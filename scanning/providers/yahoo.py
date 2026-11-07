@@ -111,13 +111,6 @@ def _build_query(
     for f in ACTIVE_FILTERS:
         operands.append(_filter_to_query(f))
 
-    if min_drawdown is not None:
-        # Year-over-year change as a loose server-side pre-filter.
-        # The precise drawdown (from 52-week high) is applied locally.
-        operands.append(
-            EquityQuery("lte", ["fiftytwowkpercentchange", -abs(min_drawdown)])
-        )
-
     return EquityQuery("and", operands)
 
 
@@ -182,7 +175,7 @@ def _paginated_screener(
         if total_available is None:
             total_available = response.get("total", 0)
             logging.info(
-                "Screener reports %d stocks matching the drawdown filter.",
+                "Screener reports %d stocks matching active filters (region, volume, P/E).",
                 total_available,
             )
 
@@ -219,15 +212,19 @@ def _paginated_screener(
                     continue  # Doesn't actually meet the drawdown threshold
 
                 # P/E: computed from price / EPS TTM (may be approximate due to
-                # currency-unit differences on some cross-listed stocks)
+                # currency-unit differences on some cross-listed stocks).
+                # Discard stocks where P/E cannot be determined (missing EPS or
+                # loss-making companies that slipped through the server-side filter).
                 eps = q.get("epsTrailingTwelveMonths")
                 pe_ratio: float | None = None
                 if eps is not None and float(eps) > 0 and current_close > 0:
                     pe_ratio = round(current_close / float(eps), 2)
 
-                # Dividend yield: screener returns as decimal (0.035 → 3.5%)
+                if pe_ratio is None:
+                    continue  # unknown P/E — discard
+
                 div_raw = q.get("dividendYield")
-                dividend_yield = round(float(div_raw) * 100, 4) if div_raw else None
+                dividend_yield = round(float(div_raw), 4) if div_raw else None
 
                 market_cap_raw = q.get("marketCap")
                 market_cap = int(market_cap_raw) if market_cap_raw is not None else None

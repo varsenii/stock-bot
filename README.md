@@ -7,22 +7,24 @@ no price-history downloads, minimal rate-limiting risk.
 ## How it works
 
 ```
-Yahoo screener  (server-side filters: region, volume, P/E, drawdown proxy)
+Yahoo screener  (server-side filters: region, volume, P/E)
       ↓
-Paginated quotes  (250 per page — price, fundamentals, 52w range all included)
+Paginated quotes  (250 per page — price, 52w range, fundamentals all included)
       ↓
-Local refinement  (precise drawdown = current / 52w-high − 1)
+Local drawdown filter  (current price / 52w HIGH − 1  ≤  −min_drawdown_pct%)
+Local P/E filter       (discard if EPS unknown or negative)
       ↓
 Excel workbook    (candidates, all scanned, failures)
 ```
 
-1. Sends a filtered screener query to Yahoo Finance.  All criteria in
-   `scan_config.yaml` (regions, volume, P/E, drawdown) are evaluated
-   **server-side** — only matching stocks are returned.
+1. Sends a filtered screener query to Yahoo Finance.  Region, volume, and P/E
+   filters are evaluated **server-side**.
 2. Paginates through results (250 per page).  Every quote already contains
-   price, 52-week range, fundamentals, and market cap — **no extra requests**.
-3. Re-checks each quote's precise `fiftyTwoWeekHighChangePercent` locally
-   (the server-side drawdown filter uses year-over-year change as a proxy).
+   current price, 52-week high/low, EPS, dividend yield, and market cap —
+   **no extra API requests needed**.
+3. Applies the drawdown filter **locally** using `fiftyTwoWeekHighChangePercent`
+   — the precise percentage drop from the **52-week high** (not from 52 weeks
+   ago).  Stocks with unknown P/E are also discarded at this stage.
 4. Writes a single formatted Excel workbook `output/stock_scan_YYYY-MM-DD.xlsx`
    with three sheets:
    - **Candidates (≥N% DD)** — stocks meeting the drawdown threshold
@@ -71,6 +73,23 @@ output_dir: output
 
 Set any value to `null` to disable that filter.
 
+### Understanding `max_results`
+
+Since the drawdown filter is applied **locally** (not by Yahoo's server), the
+scanner needs to page through the full screener catalogue to find all qualifying
+stocks.  `max_results` caps how many tickers are fetched.
+
+The screener returns ~6,700 liquid profitable European stocks (with the default
+volume + P/E filters).  At 20% drawdown, roughly 1 in 5 stocks qualify, so:
+
+| `max_results` | Tickers scanned | Approx. candidates |
+|---|---|---|
+| 500 | 500 (8%) | ~88 |
+| 2500 | 2,500 (37%) | ~440 |
+| 7000 | 6,700 (100%) | ~1,200 |
+
+Set `max_results: 7000` to scan the entire available catalogue.
+
 ## Project structure
 
 ```
@@ -107,10 +126,9 @@ The scanning logic is split along three pluggable seams:
 
 - Yahoo Finance's screener endpoint is **unofficial** for this use.
   The API can change, rate-limit, or block automated requests at any time.
-- The drawdown filter uses `fiftytwowkpercentchange` (year-over-year change)
-  as a **server-side proxy**.  The precise drawdown is re-checked locally from
-  `fiftyTwoWeekHighChangePercent`.  A stock that briefly hit a new high and
-  then fell may be missed if its year-over-year change is small.
+- The drawdown filter is applied **locally** using `fiftyTwoWeekHighChangePercent`
+  (drop from the 52-week high).  There is no server-side drawdown filter.
+  Increase `max_results` to scan more of the catalogue.
 - **P/E Ratio** is computed locally as `price / EPS TTM`.  For UK stocks
   priced in GBp (pence) with EPS reported in GBP (pounds), the computed P/E
   may be ~100× higher than the true value.  Treat it as an approximation.
@@ -214,11 +232,12 @@ Output filenames are date-stamped so each run creates a separate snapshot.
 
 ## Calculation notes
 
-- **Drawdown %** = `fiftyTwoWeekHighChangePercent × 100` from Yahoo's quote
-  data (`current_price / 52w_high − 1`).
+- **Drawdown %** = `fiftyTwoWeekHighChangePercent × 100`
+  (`current_price / 52w_high − 1`).  Negative means below the 52-week high.
 - **P/E Ratio** = `current_close / epsTrailingTwelveMonths`.  May be
   inaccurate for UK stocks (GBp vs GBP currency mismatch).
-- **Dividend Yield %** = `dividendYield × 100` from Yahoo's quote data.
+- **Dividend Yield %** = `dividendYield` from Yahoo's quote (already in %,
+  e.g. `7.60` = 7.60%).
 - **Market Cap** = `marketCap` in local currency units from Yahoo's quote.
 
 ## Suggested next versions

@@ -12,14 +12,20 @@
 regions:
   - eu
   - gb
+  # - de
 
-# Maximum number of tickers to collect from the screener.
-# Yahoo Finance typically has ~2,000–4,000 results for eu+gb at 20% drawdown.
-max_results: 250
+# Maximum number of tickers to fetch from the screener per run.
+# The screener returns ~12,000 liquid European stocks (with volume + P/E filters).
+# Since the drawdown filter is applied locally, we need to page through enough
+# tickers to find all candidates. Rule of thumb: at 20% drawdown roughly 1 in 5
+# profitable, liquid stocks qualifies — so set this to 5× your desired output.
+max_results: 2500
 
 
 # --- Primary filter ----------------------------------------------------------
-# Stocks must be at least this many percent below their 52-week high.
+# Stocks must be at least this % below their 52-WEEK HIGH (not year-over-year).
+# This filter is applied locally using Yahoo's fiftyTwoWeekHighChangePercent field,
+# which measures the precise drop from the highest price in the last 52 weeks.
 min_drawdown_pct: 20
 
 
