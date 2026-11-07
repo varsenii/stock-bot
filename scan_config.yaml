@@ -1,0 +1,45 @@
+# =============================================================================
+# Stock Scanner Configuration
+# Edit this file to change scan parameters.  No code changes needed.
+# =============================================================================
+
+
+# --- Universe ----------------------------------------------------------------
+# Regions to scan.
+# 'eu' expands to all 24 European country codes (at, be, ch, cz, de, dk, ee,
+# es, fi, fr, gb, gr, hu, ie, is, it, lt, lv, nl, no, pl, pt, ro, se).
+# Individual ISO-2 codes are also accepted (e.g. de, fr, gb).
+regions:
+  - eu
+  - gb
+
+# Maximum number of tickers to collect from the screener.
+# Yahoo Finance typically has ~2,000–4,000 results for eu+gb at 20% drawdown.
+max_results: 250
+
+
+# --- Primary filter ----------------------------------------------------------
+# Stocks must be at least this many percent below their 52-week high.
+min_drawdown_pct: 20
+
+
+# --- Additional screener filters ---------------------------------------------
+# All filters below are evaluated server-side by Yahoo Finance before any data
+# is returned.  Set a value to null to disable that filter entirely.
+#
+# Available filters and their Yahoo Finance field names are listed in
+# scanning/filters.py (FILTER_REGISTRY).
+filters:
+
+  # Minimum 3-month average daily volume.
+  # Removes illiquid cross-listings, warrants, and structured products.
+  min_avg_daily_volume: 1000
+
+  # Maximum P/E ratio (trailing twelve months).
+  # Excludes loss-making companies and highly-valued growth stocks.
+  # Set to null to include all companies regardless of profitability.
+  max_pe_ratio: 20
+
+
+# --- Output ------------------------------------------------------------------
+output_dir: output
