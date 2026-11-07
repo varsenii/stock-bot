@@ -47,5 +47,19 @@ filters:
   max_pe_ratio: 20
 
 
+# --- Screener sort -----------------------------------------------------------
+# Controls how Yahoo Finance orders tickers before they are paged.
+# This determines which stocks you see when max_results < full catalogue.
+#
+# Common sort fields:
+#   avgdailyvol3m      — 3-month avg daily volume (most liquid first) [default]
+#   intradaymarketcap  — market capitalisation
+#   intradayprice      — current price
+#   percentchange      — today's % price change
+sort:
+  field: avgdailyvol3m
+  ascending: false   # false = highest value first
+
+
 # --- Output ------------------------------------------------------------------
 output_dir: output

@@ -55,13 +55,22 @@ _COLUMN_LABELS: dict[str, str] = {
     "pe_ratio": "P/E Ratio",
     "dividend_yield": "Dividend Yield %",
     "market_cap": "Market Cap",
+    # Liquidity
+    "avg_volume_3m": "Avg Vol (3M)",
+    "avg_volume_10d": "Avg Vol (10D)",
+    "bid": "Bid",
+    "ask": "Ask",
+    "bid_ask_spread": "Bid-Ask Spread",
+    "bid_ask_spread_pct": "Spread %",
+    "avg_daily_value": "Avg Daily Value (3M)",
+    "today_value": "Today's Value",
 }
 
 _DRAWDOWN_COL = "Drawdown %"
-_PRICE_COLS = ("Current Close", "52-Week High", "52-Week Low")
+_PRICE_COLS = ("Current Close", "52-Week High", "52-Week Low", "Bid", "Ask", "Bid-Ask Spread")
 _RATIO_COLS = ("P/E Ratio",)
-_PCT_COLS = ("Dividend Yield %",)
-_LARGE_NUM_COLS = ("Market Cap",)
+_PCT_COLS = ("Dividend Yield %", "Spread %")
+_LARGE_NUM_COLS = ("Market Cap", "Avg Vol (3M)", "Avg Vol (10D)", "Avg Daily Value (3M)", "Today's Value")
 
 
 # ---------------------------------------------------------------------------

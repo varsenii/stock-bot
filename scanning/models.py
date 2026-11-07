@@ -32,6 +32,16 @@ class StockResult:
     dividend_yield: float | None = None  # Dividend yield % (e.g. 3.5 means 3.5%)
     market_cap: int | None = None        # Market capitalisation in local currency units
 
+    # --- Liquidity ---
+    avg_volume_3m: int | None = None          # Avg daily share volume, 3-month window
+    avg_volume_10d: int | None = None         # Avg daily share volume, 10-day window
+    bid: float | None = None                  # Best bid price
+    ask: float | None = None                  # Best ask price
+    bid_ask_spread: float | None = None       # ask − bid (absolute)
+    bid_ask_spread_pct: float | None = None   # (ask − bid) / mid_price × 100
+    avg_daily_value: float | None = None      # 50-day avg price × 3M avg volume (approx ADTV)
+    today_value: float | None = None          # current price × today's volume
+
 
 @dataclass(frozen=True)
 class ScanFailure:

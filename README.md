@@ -9,7 +9,7 @@ no price-history downloads, minimal rate-limiting risk.
 ```
 Yahoo screener  (server-side filters: region, volume, P/E)
       ↓
-Paginated quotes  (250 per page — price, 52w range, fundamentals all included)
+Paginated quotes  (250 per page — price, 52w range, fundamentals, liquidity)
       ↓
 Local drawdown filter  (current price / 52w HIGH − 1  ≤  −min_drawdown_pct%)
 Local P/E filter       (discard if EPS unknown or negative)
@@ -18,9 +18,10 @@ Excel workbook    (candidates, all scanned, failures)
 ```
 
 1. Sends a filtered screener query to Yahoo Finance.  Region, volume, and P/E
-   filters are evaluated **server-side**.
+   filters are evaluated **server-side**.  Results are sorted by the configured
+   `sort.field` before pagination.
 2. Paginates through results (250 per page).  Every quote already contains
-   current price, 52-week high/low, EPS, dividend yield, and market cap —
+   current price, 52-week range, fundamentals, and liquidity data —
    **no extra API requests needed**.
 3. Applies the drawdown filter **locally** using `fiftyTwoWeekHighChangePercent`
    — the precise percentage drop from the **52-week high** (not from 52 weeks
@@ -31,35 +32,62 @@ Excel workbook    (candidates, all scanned, failures)
    - **All Scanned** — every stock returned by the screener
    - **Failures** — empty in screener mode
 
-   **Output columns:**
-   Company Name · Symbol · Latest Price Date · Current Close ·
-   52-Week High · 52-Week Low · Drawdown % · P/E Ratio ·
-   Dividend Yield % · Market Cap
+## Output columns
 
-   The workbook is formatted with bold headers, frozen panes, alternating row
-   fills, and a green→yellow→red colour scale on the Drawdown % column.
+| Column | Description |
+|---|---|
+| Company Name | Full company name |
+| Symbol | Ticker (e.g. `VOD.L`, `ENEL.MI`) |
+| Latest Price Date | Date of the price data |
+| Current Close | Last closing price |
+| 52-Week High | Highest price in the last 52 weeks |
+| 52-Week Low | Lowest price in the last 52 weeks |
+| Drawdown % | Drop from 52-week high (negative = below high) |
+| P/E Ratio | Trailing P/E computed as `price / EPS TTM` ¹ |
+| Dividend Yield % | Annual dividend yield in % |
+| Market Cap | Market capitalisation in local currency |
+| Avg Vol (3M) | Average daily share volume, 3-month window |
+| Avg Vol (10D) | Average daily share volume, 10-day window |
+| Bid | Best bid price |
+| Ask | Best ask price |
+| Bid-Ask Spread | `ask − bid` (absolute) |
+| Spread % | `(ask − bid) / mid × 100` (relative cost of trading) |
+| Avg Daily Value (3M) | ≈ ADTV in currency: `50-day avg price × 3M avg volume` |
+| Today's Value | `current price × today's volume` |
+
+¹ For UK stocks priced in GBp (pence) with EPS in GBP, the P/E may be ~100×
+off. The server-side P/E filter (`max_pe_ratio`) uses Yahoo's correctly-adjusted
+value.
+
+The workbook is formatted with bold headers, frozen panes, alternating row
+fills, number formats per column type, and a green→yellow→red colour scale on
+the Drawdown % column.
 
 ## Configuration — `scan_config.yaml`
 
 **This is the only file you need to edit.**  No code changes, no CLI flags.
 
 ```yaml
-# Regions to scan ('eu' expands to all 24 European country codes)
 regions:
-  - eu
+  - eu      # expands to all 24 European country codes
   - gb
 
 max_results: 2500          # max tickers to fetch from screener
+
 min_drawdown_pct: 20       # stocks at least this % below 52-week high
 
 filters:
   min_avg_daily_volume: 1000   # removes illiquid instruments
   max_pe_ratio: 20             # set to null to include all companies
 
+sort:
+  field: avgdailyvol3m    # most liquid stocks fetched first
+  ascending: false        # false = highest value first
+
 output_dir: output
 ```
 
-### Available filter keys
+### Filter keys
 
 | Key | Description | Direction |
 |---|---|---|
@@ -73,14 +101,23 @@ output_dir: output
 
 Set any value to `null` to disable that filter.
 
+### Sort field options
+
+| `sort.field` | Effect |
+|---|---|
+| `avgdailyvol3m` | Most liquid stocks first (default) |
+| `intradaymarketcap` | Largest companies first |
+| `intradayprice` | Highest-priced stocks first |
+| `percentchange` | Biggest daily movers first |
+
 ### Understanding `max_results`
 
-Since the drawdown filter is applied **locally** (not by Yahoo's server), the
-scanner needs to page through the full screener catalogue to find all qualifying
-stocks.  `max_results` caps how many tickers are fetched.
+The drawdown filter is applied **locally** (not by Yahoo's server), so the
+scanner pages through the screener catalogue to find qualifying stocks.
+`max_results` caps how many tickers are fetched.
 
 The screener returns ~6,700 liquid profitable European stocks (with the default
-volume + P/E filters).  At 20% drawdown, roughly 1 in 5 stocks qualify, so:
+filters).  At 20% drawdown, roughly 1 in 5 stocks qualify, so:
 
 | `max_results` | Tickers scanned | Approx. candidates |
 |---|---|---|
@@ -114,14 +151,6 @@ stock_bot/
         └── excel.py         Formatted Excel exporter
 ```
 
-The scanning logic is split along three pluggable seams:
-
-| Concern | Interface | Default implementation |
-|---|---|---|
-| Universe / screener | `UniverseProvider` | `YahooUniverseProvider` |
-| Price / OHLCV data | `PriceProvider` | `YahooPriceProvider` (fallback only) |
-| Output format | `BaseExporter` | `ExcelExporter` |
-
 ## Important limitations
 
 - Yahoo Finance's screener endpoint is **unofficial** for this use.
@@ -129,17 +158,16 @@ The scanning logic is split along three pluggable seams:
 - The drawdown filter is applied **locally** using `fiftyTwoWeekHighChangePercent`
   (drop from the 52-week high).  There is no server-side drawdown filter.
   Increase `max_results` to scan more of the catalogue.
-- **P/E Ratio** is computed locally as `price / EPS TTM`.  For UK stocks
-  priced in GBp (pence) with EPS reported in GBP (pounds), the computed P/E
-  may be ~100× higher than the true value.  Treat it as an approximation.
+- **P/E Ratio** in the output is computed locally as `price / EPS TTM` and
+  may be inaccurate for UK stocks (GBp vs GBP currency mismatch).
+- **Avg Daily Value** is an approximation: `50-day avg price × 3-month avg volume`.
+  It is not a direct market data point.
+- **Bid/Ask/Spread** are delayed (15 min for most European exchanges) and may
+  not be available after market close.
 - `eu` expands to 24 individual country codes.  This is not a certified
   complete directory of every European listing.
-- Yahoo data can be delayed or unavailable for some symbols.  Verify any
-  candidate against the exchange/broker before acting.
-- This version screens **price only**.  It does not assess fundamentals beyond
-  the filter criteria.
-- Intended for personal research.  Check data providers' terms before
-  commercial use or redistribution.
+- Intended for personal research.  Verify candidates with your broker.
+  Check data providers' terms before commercial use.
 
 ## Setup
 
@@ -150,7 +178,6 @@ Use Python 3.10 or newer.
 ```powershell
 py -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
@@ -159,7 +186,6 @@ pip install -r requirements.txt
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
@@ -167,39 +193,23 @@ pip install -r requirements.txt
 
 ```bash
 cd stock_bot
-source .venv/bin/activate   # or .venv\Scripts\Activate.ps1 on Windows
+source .venv/bin/activate   # Windows: .venv\Scripts\Activate.ps1
 python cli.py
 ```
 
-The scanner reads all parameters from `scan_config.yaml`.  Edit that file to
-change regions, thresholds, or filters, then re-run.
+The scanner reads all parameters from `scan_config.yaml`.
 
 ### Optional CLI overrides
-
-For one-off runs without editing the YAML:
 
 ```bash
 python cli.py --min-drawdown 30
 python cli.py --regions de,fr,nl
 python cli.py --max-results 1000
 python cli.py --output-dir /data/scans
-```
-
-Scan a hand-maintained list (bypasses screener, uses price-history downloads):
-
-```bash
-python cli.py --symbols-file my_symbols.csv
+python cli.py --symbols-file my_symbols.csv   # bypasses screener
 ```
 
 ## Run daily
-
-### Windows Task Scheduler
-
-1. Open **Task Scheduler** → **Create Basic Task**.
-2. Trigger: **Daily**, e.g. 20:30 local time (Europe/Rome).
-3. Action: **Start a program** — full path to `.venv\Scripts\python.exe`.
-4. Arguments: `cli.py`.
-5. Start in: `stock_bot/` folder.
 
 ### Linux / macOS cron
 
@@ -207,7 +217,12 @@ python cli.py --symbols-file my_symbols.csv
 30 20 * * 1-5 cd /path/to/stock_bot && .venv/bin/python cli.py >> scanner.log 2>&1
 ```
 
-Output filenames are date-stamped so each run creates a separate snapshot.
+### Windows Task Scheduler
+
+1. **Trigger:** Daily at 20:30 (after European market close).
+2. **Program:** full path to `.venv\Scripts\python.exe`.
+3. **Arguments:** `cli.py`.
+4. **Start in:** `stock_bot/` folder.
 
 ## Extending the scanner
 
@@ -218,27 +233,28 @@ Output filenames are date-stamped so each run creates a separate snapshot.
 
 ### Adding a new data provider
 
-1. Create `scanning/providers/my_provider.py`, subclass `UniverseProvider`
-   and/or `PriceProvider`.
-2. Override `get_precomputed_results()` to return `StockResult` objects
-   directly from the data source (skips price downloads).
-3. In `cli.py`, replace `YahooProvider()` with `MyProvider()`.
+1. Subclass `UniverseProvider` / `PriceProvider` in a new file under `scanning/providers/`.
+2. Override `get_precomputed_results()` to return `StockResult` objects directly.
+3. Replace `YahooProvider()` in `cli.py`.
 
 ### Adding a new output format
 
-1. Create `scanning/exporters/my_exporter.py`, subclass `BaseExporter`.
-2. Register in `scanning/exporters/__init__.py`.
-3. In `cli.py`, replace `ExcelExporter()` with `MyExporter()`.
+1. Subclass `BaseExporter` in a new file under `scanning/exporters/`.
+2. Register it in `scanning/exporters/__init__.py`.
+3. Replace `ExcelExporter()` in `cli.py`.
 
 ## Calculation notes
 
-- **Drawdown %** = `fiftyTwoWeekHighChangePercent × 100`
-  (`current_price / 52w_high − 1`).  Negative means below the 52-week high.
-- **P/E Ratio** = `current_close / epsTrailingTwelveMonths`.  May be
-  inaccurate for UK stocks (GBp vs GBP currency mismatch).
-- **Dividend Yield %** = `dividendYield` from Yahoo's quote (already in %,
-  e.g. `7.60` = 7.60%).
-- **Market Cap** = `marketCap` in local currency units from Yahoo's quote.
+| Column | Formula |
+|---|---|
+| Drawdown % | `fiftyTwoWeekHighChangePercent × 100` |
+| P/E Ratio | `regularMarketPrice / epsTrailingTwelveMonths` |
+| Dividend Yield % | `dividendYield` (already in %, e.g. `7.60` = 7.60%) |
+| Market Cap | `marketCap` in local currency units |
+| Avg Daily Value (3M) | `fiftyDayAverage × averageDailyVolume3Month` |
+| Today's Value | `regularMarketPrice × regularMarketVolume` |
+| Bid-Ask Spread | `ask − bid` |
+| Spread % | `(ask − bid) / ((ask + bid) / 2) × 100` |
 
 ## Suggested next versions
 

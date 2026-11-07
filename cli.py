@@ -127,6 +127,10 @@ def build_config(yaml_cfg: dict, args: argparse.Namespace) -> ScanConfig:
     output_dir = args.output_dir if args.output_dir is not None \
         else Path(yaml_cfg.get("output_dir", "output"))
 
+    sort_cfg: dict = yaml_cfg.get("sort", {}) or {}
+    sort_field: str = str(sort_cfg.get("field", "avgdailyvol3m"))
+    sort_ascending: bool = bool(sort_cfg.get("ascending", False))
+
     return ScanConfig(
         regions=regions,
         min_drawdown=min_drawdown,
@@ -136,6 +140,8 @@ def build_config(yaml_cfg: dict, args: argparse.Namespace) -> ScanConfig:
         symbols_file=args.symbols_file,
         output_dir=output_dir,
         pause=args.pause,
+        sort_field=sort_field,
+        sort_ascending=sort_ascending,
     )
 
 

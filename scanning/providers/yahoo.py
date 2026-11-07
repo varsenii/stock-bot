@@ -114,14 +114,20 @@ def _build_query(
     return EquityQuery("and", operands)
 
 
-def _fetch_page(query: EquityQuery, offset: int, size: int) -> dict:
+def _fetch_page(
+    query: EquityQuery,
+    offset: int,
+    size: int,
+    sort_field: str = "avgdailyvol3m",
+    sort_ascending: bool = False,
+) -> dict:
     """Fetch one page from the Yahoo Finance screener."""
     return yf.screen(
         query,
         offset=offset,
         size=size,
-        sortField="avgdailyvol3m",   # most liquid stocks first → better data coverage
-        sortAsc=False,
+        sortField=sort_field,
+        sortAsc=sort_ascending,
     ) or {}
 
 
@@ -131,6 +137,8 @@ def _paginated_screener(
     page_size: int = _PAGE_SIZE,
     inter_page_pause: float = 0.4,
     min_drawdown: float | None = None,
+    sort_field: str = "avgdailyvol3m",
+    sort_ascending: bool = False,
 ) -> tuple[list[str], dict[str, str], list[StockResult]]:
     """
     Page through the Yahoo Finance screener until *max_results* symbols are
@@ -165,7 +173,7 @@ def _paginated_screener(
         page_num += 1
 
         try:
-            response = _fetch_page(query, offset, fetch_size)
+            response = _fetch_page(query, offset, fetch_size, sort_field, sort_ascending)
         except Exception as exc:
             logging.warning(
                 "Screener page %d failed: %s — stopping pagination.", page_num, exc
@@ -229,6 +237,37 @@ def _paginated_screener(
                 market_cap_raw = q.get("marketCap")
                 market_cap = int(market_cap_raw) if market_cap_raw is not None else None
 
+                # --- Liquidity fields ---
+                avg_vol_3m_raw = q.get("averageDailyVolume3Month")
+                avg_volume_3m = int(avg_vol_3m_raw) if avg_vol_3m_raw is not None else None
+
+                avg_vol_10d_raw = q.get("averageDailyVolume10Day")
+                avg_volume_10d = int(avg_vol_10d_raw) if avg_vol_10d_raw is not None else None
+
+                bid_raw = q.get("bid")
+                ask_raw = q.get("ask")
+                bid = round(float(bid_raw), 6) if bid_raw is not None else None
+                ask = round(float(ask_raw), 6) if ask_raw is not None else None
+
+                bid_ask_spread: float | None = None
+                bid_ask_spread_pct: float | None = None
+                if bid is not None and ask is not None and bid > 0 and ask > 0:
+                    bid_ask_spread = round(ask - bid, 6)
+                    mid = (ask + bid) / 2
+                    bid_ask_spread_pct = round((ask - bid) / mid * 100, 4)
+
+                # Approx ADTV: 50-day avg price × 3-month avg volume
+                fifty_day_avg = q.get("fiftyDayAverage")
+                avg_daily_value: float | None = None
+                if fifty_day_avg is not None and avg_volume_3m is not None:
+                    avg_daily_value = round(float(fifty_day_avg) * avg_volume_3m, 2)
+
+                # Today's traded value: current price × today's volume
+                today_vol_raw = q.get("regularMarketVolume")
+                today_value: float | None = None
+                if today_vol_raw is not None and current_close > 0:
+                    today_value = round(current_close * int(today_vol_raw), 2)
+
                 results.append(
                     StockResult(
                         name=name,
@@ -241,6 +280,14 @@ def _paginated_screener(
                         pe_ratio=pe_ratio,
                         dividend_yield=dividend_yield,
                         market_cap=market_cap,
+                        avg_volume_3m=avg_volume_3m,
+                        avg_volume_10d=avg_volume_10d,
+                        bid=bid,
+                        ask=ask,
+                        bid_ask_spread=bid_ask_spread,
+                        bid_ask_spread_pct=bid_ask_spread_pct,
+                        avg_daily_value=avg_daily_value,
+                        today_value=today_value,
                     )
                 )
 
@@ -366,23 +413,26 @@ class YahooUniverseProvider(UniverseProvider):
         regions: list[str],
         max_results: int,
         min_drawdown: float,
+        sort_field: str = "avgdailyvol3m",
+        sort_ascending: bool = False,
     ) -> list[StockResult] | None:
         """
         Return drawdown results computed directly from screener quotes —
         no price-history downloads needed.
 
-        Yahoo's ``fiftytwowkpercentchange`` (year-over-year change) is used
-        as a server-side pre-filter.  Each quote's ``fiftyTwoWeekHighChangePercent``
-        field (precise drawdown from 52-week high) is then checked locally so
-        only stocks that genuinely meet the threshold are returned.
+        Each quote's ``fiftyTwoWeekHighChangePercent`` field (precise drawdown
+        from 52-week high) is checked locally so only stocks that genuinely
+        meet the threshold are returned.
         """
         country_codes = _expand_regions(regions)
         logging.info(
             "Screener-only scan  regions=%s → %d country codes  "
-            "drawdown ≥ %.0f%%  (max %d, %d per page)...",
+            "drawdown ≥ %.0f%%  sort=%s %s  (max %d, %d per page)...",
             regions,
             len(country_codes),
             min_drawdown,
+            sort_field,
+            "ASC" if sort_ascending else "DESC",
             max_results,
             _PAGE_SIZE,
         )
@@ -391,6 +441,8 @@ class YahooUniverseProvider(UniverseProvider):
             country_codes,
             max_results,
             min_drawdown=min_drawdown,
+            sort_field=sort_field,
+            sort_ascending=sort_ascending,
         )
         self._screener_names = names
 

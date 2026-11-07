@@ -28,6 +28,10 @@ class ScanConfig:
     batch_size: int = 80                      # symbols per yfinance download call
     pause: float = 1.0                        # seconds between batches
 
+    # --- Sort ---
+    sort_field: str = "avgdailyvol3m"   # screener field to sort by
+    sort_ascending: bool = False        # False = highest value first
+
     # --- Output ---
     output_dir: Path = field(default_factory=lambda: Path("output"))
 

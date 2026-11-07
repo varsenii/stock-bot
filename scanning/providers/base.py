@@ -31,6 +31,8 @@ class UniverseProvider(ABC):
         regions: list[str],
         max_results: int,
         min_drawdown: float,
+        sort_field: str = "avgdailyvol3m",
+        sort_ascending: bool = False,
     ) -> list[StockResult] | None:
         """
         Optionally return fully-computed ``StockResult`` objects directly from

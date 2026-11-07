@@ -93,6 +93,8 @@ class Scanner:
             regions=self._config.regions,
             max_results=self._config.max_results,
             min_drawdown=self._config.min_drawdown,
+            sort_field=self._config.sort_field,
+            sort_ascending=self._config.sort_ascending,
         )
 
         if precomputed is not None:
