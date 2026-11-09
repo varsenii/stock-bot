@@ -33,6 +33,7 @@ class UniverseProvider(ABC):
         min_drawdown: float,
         sort_field: str = "avgdailyvol3m",
         sort_ascending: bool = False,
+        min_fcf_cagr: float | None = None,
     ) -> list[StockResult] | None:
         """
         Optionally return fully-computed ``StockResult`` objects directly from

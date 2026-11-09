@@ -73,6 +73,20 @@ filters:
   max_net_debt_to_ebitda: 2
 
 
+# --- Local post-filters ------------------------------------------------------
+# These filters are applied AFTER the Ticker.info enrichment step.
+# They cannot be evaluated server-side because Yahoo Finance's screener does
+# not expose these metrics.
+local_filters:
+
+  # Minimum FCF CAGR (Compound Annual Growth Rate) in percent.
+  # Computed from the oldest to most recent year where FCF was positive
+  # (up to 5 fiscal years from yfinance's annual cash flow statement).
+  # 0 means FCF must be non-declining (CAGR ≥ 0%).
+  # Set to null to disable.
+  min_fcf_cagr: 0
+
+
 # --- Screener sort -----------------------------------------------------------
 # Controls how Yahoo Finance orders tickers before they are paged.
 # This determines which stocks you see when max_results < full catalogue.

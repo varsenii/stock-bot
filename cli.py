@@ -131,6 +131,10 @@ def build_config(yaml_cfg: dict, args: argparse.Namespace) -> ScanConfig:
     sort_field: str = str(sort_cfg.get("field", "avgdailyvol3m"))
     sort_ascending: bool = bool(sort_cfg.get("ascending", False))
 
+    local_filters: dict = yaml_cfg.get("local_filters", {}) or {}
+    min_fcf_cagr_raw = local_filters.get("min_fcf_cagr")
+    min_fcf_cagr: float | None = float(min_fcf_cagr_raw) if min_fcf_cagr_raw is not None else None
+
     return ScanConfig(
         regions=regions,
         min_drawdown=min_drawdown,
@@ -142,6 +146,7 @@ def build_config(yaml_cfg: dict, args: argparse.Namespace) -> ScanConfig:
         pause=args.pause,
         sort_field=sort_field,
         sort_ascending=sort_ascending,
+        min_fcf_cagr=min_fcf_cagr,
     )
 
 

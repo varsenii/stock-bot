@@ -47,6 +47,7 @@ _ALT_ROW_FILL = PatternFill(fill_type="solid", fgColor="DCE6F1")  # light blue
 _COLUMN_LABELS: dict[str, str] = {
     "name": "Company Name",
     "symbol": "Symbol",
+    "currency": "Currency",
     "sector": "Sector",
     "industry": "Industry",
     "latest_price_date": "Latest Price Date",
@@ -62,6 +63,7 @@ _COLUMN_LABELS: dict[str, str] = {
     "lfcf": "LFCF (TTM)",
     "p_fcf": "P/FCF",
     "p_lfcf": "P/LFCF",
+    "fcf_cagr": "FCF CAGR %",
     # Debt (MRQ balance sheet, except net_debt_to_ebitda which is MRQ/TTM)
     "total_debt": "Total Debt (MRQ)",
     "net_debt": "Net Debt (MRQ)",
@@ -82,6 +84,7 @@ _DRAWDOWN_COL = "Drawdown %"
 _PRICE_COLS = ("Current Close", "52-Week High", "52-Week Low", "Bid", "Ask", "Bid-Ask Spread")
 _RATIO_COLS = ("P/E Ratio",)
 _PCT_COLS = ("Dividend Yield %", "Spread %")
+_RATIO_COLS_FCF = ("P/FCF", "P/LFCF", "FCF CAGR %")
 _RATIO_COLS_DEBT = ("Debt/Equity (MRQ)", "Net Debt/EBITDA (MRQ/TTM)")
 _LARGE_NUM_COLS = ("Market Cap", "FCF (TTM)", "LFCF (TTM)", "Total Debt (MRQ)", "Net Debt (MRQ)", "Avg Vol (3M)", "Avg Vol (10D)", "Avg Daily Value (3M)", "Today's Value")
 
@@ -122,6 +125,12 @@ def _apply_number_formats(ws: Worksheet) -> None:
             letter = get_column_letter(col_index[col_name])
             for cell in ws[letter][1:]:
                 cell.number_format = "#,##0.000000"
+
+    for col_name in _RATIO_COLS_FCF:
+        if col_name in col_index:
+            letter = get_column_letter(col_index[col_name])
+            for cell in ws[letter][1:]:
+                cell.number_format = "0.00"
 
     for col_name in _RATIO_COLS:
         if col_name in col_index:

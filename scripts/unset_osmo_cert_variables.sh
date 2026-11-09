@@ -1,0 +1,2 @@
+unset SSL_CERT
+unset REQUESTS_CA_BUNDLE

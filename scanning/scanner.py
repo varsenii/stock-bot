@@ -95,6 +95,7 @@ class Scanner:
             min_drawdown=self._config.min_drawdown,
             sort_field=self._config.sort_field,
             sort_ascending=self._config.sort_ascending,
+            min_fcf_cagr=self._config.min_fcf_cagr,
         )
 
         if precomputed is not None:

@@ -20,8 +20,9 @@ class StockResult:
 
     # --- Price ---
     latest_price_date: str               # ISO-8601 date string, e.g. "2026-11-06"
-    current_close: float
-    high_52w: float
+    currency: str | None = None          # Trading currency, e.g. "EUR", "GBp", "NOK"
+    current_close: float = 0.0
+    high_52w: float = 0.0
     low_52w: float | None = None         # 52-week low
 
     # --- Drawdown ---
@@ -37,6 +38,7 @@ class StockResult:
     lfcf: int | None = None              # Levered Free Cash Flow TTM (FCF − net debt payments)
     p_fcf: float | None = None           # Price / FCF = market_cap / fcf
     p_lfcf: float | None = None          # Price / Levered FCF = market_cap / lfcf
+    fcf_cagr: float | None = None        # FCF CAGR % over available positive history
     total_debt: int | None = None        # Total Debt MRQ (from balance sheet)
     net_debt: int | None = None          # Net Debt MRQ = totalDebt − totalCash
     total_debt_to_equity: float | None = None  # Total Debt / Equity MRQ (ratio, e.g. 1.47)

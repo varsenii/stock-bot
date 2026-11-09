@@ -28,6 +28,9 @@ class ScanConfig:
     batch_size: int = 80                      # symbols per yfinance download call
     pause: float = 1.0                        # seconds between batches
 
+    # --- Local post-filters (applied after Ticker.info enrichment) ---
+    min_fcf_cagr: float | None = None   # Minimum FCF CAGR %; None = no filter
+
     # --- Sort ---
     sort_field: str = "avgdailyvol3m"   # screener field to sort by
     sort_ascending: bool = False        # False = highest value first

@@ -271,11 +271,14 @@ def _paginated_screener(
                 if today_vol_raw is not None and current_close > 0:
                     today_value = round(current_close * int(today_vol_raw), 2)
 
+                currency = q.get("currency") or None
+
                 results.append(
                     StockResult(
                         name=name,
                         symbol=sym,
                         latest_price_date=today,
+                        currency=currency,
                         current_close=round(current_close, 6),
                         high_52w=round(high_52w, 6),
                         low_52w=low_52w,
@@ -367,17 +370,57 @@ def _fetch_names_fallback(symbols: list[str], max_workers: int = 10) -> dict[str
         return {futures[f]: f.result() for f in as_completed(futures)}
 
 
+def _compute_fcf_cagr(fcf_series: "pd.Series") -> float | None:
+    """
+    Compute annualised FCF CAGR (%) from a historical annual FCF Series.
+
+    Uses the oldest and most recent available years.  If either endpoint is
+    negative or zero the CAGR is mathematically undefined and None is returned
+    — the stock will still be included in results but the column will be blank.
+
+    Requires at least 2 data points with a positive first and last value.
+    """
+    clean = fcf_series.dropna().sort_index()   # oldest first
+    if len(clean) < 2:
+        return None
+
+    start_val = float(clean.iloc[0])
+    end_val = float(clean.iloc[-1])
+
+    # Both endpoints must be positive; a negative start or end makes CAGR
+    # meaningless (sign change mid-series = no real-number interpretation).
+    if start_val <= 0 or end_val <= 0:
+        return None
+
+    n_years = clean.index[-1].year - clean.index[0].year
+    if n_years <= 0:
+        return None
+
+    cagr = (end_val / start_val) ** (1.0 / n_years) - 1.0
+    return round(cagr * 100, 2)   # e.g. 15.3 means 15.3 %/year
+
+
 def _fetch_fcf(symbol: str) -> dict:
     """
-    Fetch cash-flow, debt, sector, and industry for a single symbol via
-    ``yf.Ticker.info``.  Returns a dict or empty dict on failure.
+    Fetch cash-flow, debt, sector, industry, and historical FCF series for a
+    single symbol via ``yf.Ticker``.  Returns a dict or empty dict on failure.
     """
     try:
-        info = yf.Ticker(symbol).info
+        ticker = yf.Ticker(symbol)
+        info = ticker.info
+
+        # Historical annual FCF for CAGR computation (up to 5 fiscal years)
+        try:
+            cf = ticker.cash_flow
+            fcf_series = cf.loc["Free Cash Flow"] if "Free Cash Flow" in cf.index else None
+        except Exception:
+            fcf_series = None
+
         return {
             # Cash flow (TTM)
             "fcf": info.get("freeCashflow"),          # op. CF − capex (TTM)
             "lfcf": info.get("leveredFreeCashFlow"),   # FCF − net debt payments (TTM)
+            "fcf_series": fcf_series,                  # pd.Series of annual FCF
             # Debt (MRQ balance sheet)
             "total_debt": info.get("totalDebt"),       # total interest-bearing debt (MRQ)
             "total_cash": info.get("totalCash"),       # cash & equivalents (MRQ)
@@ -395,14 +438,15 @@ def _fetch_fcf(symbol: str) -> dict:
 def _enrich_with_fcf(
     results: list[StockResult],
     max_workers: int = 15,
+    min_fcf_cagr: float | None = None,
 ) -> list[StockResult]:
     """
     Fetch FCF metrics for all *results* in parallel and return a new list of
-    ``StockResult`` objects enriched with ``fcf``, ``lfcf``, ``p_fcf``,
-    ``p_lfcf``.
+    ``StockResult`` objects enriched with FCF, LFCF, CAGR, debt, sector, and
+    industry.
 
-    Uses ``yf.Ticker.info`` (one HTTP request per symbol) with a thread pool
-    to minimise wall-clock time.
+    *min_fcf_cagr* — if set, stocks where CAGR is not computable or falls
+    below the threshold are discarded (local filter, not server-side).
     """
     if not results:
         return results
@@ -462,6 +506,23 @@ def _enrich_with_fcf(
         if net_debt is not None and ebitda_raw is not None and float(ebitda_raw) > 0:
             net_debt_to_ebitda = round(net_debt / float(ebitda_raw), 2)
 
+        # --- FCF CAGR (from historical annual cash flow) ---
+        fcf_series = data.get("fcf_series")
+        fcf_cagr: float | None = None
+        if fcf_series is not None:
+            try:
+                fcf_cagr = _compute_fcf_cagr(fcf_series)
+            except Exception:
+                fcf_cagr = None
+
+        # Local FCF CAGR filter.
+        # Only discard if CAGR is computable AND below the threshold.
+        # If CAGR is None (endpoint was negative — undefined), keep the stock.
+        if min_fcf_cagr is not None and fcf_cagr is not None:
+            if fcf_cagr < min_fcf_cagr:
+                discarded += 1
+                continue
+
         enriched.append(dataclasses.replace(
             r,
             sector=sector,
@@ -470,6 +531,7 @@ def _enrich_with_fcf(
             lfcf=lfcf,
             p_fcf=p_fcf,
             p_lfcf=p_lfcf,
+            fcf_cagr=fcf_cagr,
             total_debt=total_debt,
             net_debt=net_debt,
             total_debt_to_equity=total_debt_to_equity,
@@ -533,6 +595,7 @@ class YahooUniverseProvider(UniverseProvider):
         min_drawdown: float,
         sort_field: str = "avgdailyvol3m",
         sort_ascending: bool = False,
+        min_fcf_cagr: float | None = None,
     ) -> list[StockResult] | None:
         """
         Return drawdown results computed directly from screener quotes —
@@ -575,8 +638,8 @@ class YahooUniverseProvider(UniverseProvider):
             len(symbols),
             len(results),
         )
-        # Enrich candidates with FCF data (parallel Ticker.info calls).
-        return _enrich_with_fcf(results)
+        # Enrich candidates with FCF data and apply local filters.
+        return _enrich_with_fcf(results, min_fcf_cagr=min_fcf_cagr)
 
 
 class YahooPriceProvider(PriceProvider):
