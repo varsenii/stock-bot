@@ -19,7 +19,7 @@ regions:
 # Since the drawdown filter is applied locally, we need to page through enough
 # tickers to find all candidates. Rule of thumb: at 20% drawdown roughly 1 in 5
 # profitable, liquid stocks qualifies — so set this to 5× your desired output.
-max_results: 2500
+max_results: 250
 
 
 # --- Primary filter ----------------------------------------------------------
@@ -41,10 +41,36 @@ filters:
   # Removes illiquid cross-listings, warrants, and structured products.
   min_avg_daily_volume: 1000
 
+  # Maximum stock price (intraday).
+  # Useful to filter out very high-priced stocks (e.g. Berkshire Hathaway
+  # cross-listings). Note: UK stocks are priced in GBp (pence), so £10 = 1000.
+  # Set to null to include all price levels.
+  max_price: 100
+  min_price: 0
+
+
   # Maximum P/E ratio (trailing twelve months).
   # Excludes loss-making companies and highly-valued growth stocks.
   # Set to null to include all companies regardless of profitability.
   max_pe_ratio: 20
+
+  # Minimum Free Cash Flow (unlevered, trailing twelve months).
+  # Ensures only companies generating positive operating cash flow after capex
+  # are included.  Set to null to include companies with negative FCF.
+  min_fcf: 0
+
+  # Maximum Net Debt / EBITDA (trailing twelve months).
+  # Filters out heavily indebted companies.  2× is a common conservative threshold.
+  # Set to null to disable.
+  #
+  # NOTE: The server-side filter uses Yahoo's fully TTM-based net debt figure.
+  # The "Net Debt/EBITDA (MRQ/TTM)" column in the Excel output is computed
+  # locally using MRQ balance-sheet net debt divided by TTM EBITDA.  These
+  # two figures can differ — especially when a company's debt changed
+  # significantly in the most recent quarter — so a stock that passed the
+  # server-side ≤ 2× filter may show a slightly higher value in the output
+  # column.  The server-side filter is the authoritative one.
+  max_net_debt_to_ebitda: 2
 
 
 # --- Screener sort -----------------------------------------------------------

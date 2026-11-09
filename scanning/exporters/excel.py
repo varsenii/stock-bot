@@ -47,6 +47,8 @@ _ALT_ROW_FILL = PatternFill(fill_type="solid", fgColor="DCE6F1")  # light blue
 _COLUMN_LABELS: dict[str, str] = {
     "name": "Company Name",
     "symbol": "Symbol",
+    "sector": "Sector",
+    "industry": "Industry",
     "latest_price_date": "Latest Price Date",
     "current_close": "Current Close",
     "high_52w": "52-Week High",
@@ -55,6 +57,16 @@ _COLUMN_LABELS: dict[str, str] = {
     "pe_ratio": "P/E Ratio",
     "dividend_yield": "Dividend Yield %",
     "market_cap": "Market Cap",
+    # Cash flow (TTM)
+    "fcf": "FCF (TTM)",
+    "lfcf": "LFCF (TTM)",
+    "p_fcf": "P/FCF",
+    "p_lfcf": "P/LFCF",
+    # Debt (MRQ balance sheet, except net_debt_to_ebitda which is MRQ/TTM)
+    "total_debt": "Total Debt (MRQ)",
+    "net_debt": "Net Debt (MRQ)",
+    "total_debt_to_equity": "Debt/Equity (MRQ)",
+    "net_debt_to_ebitda": "Net Debt/EBITDA (MRQ/TTM)",
     # Liquidity
     "avg_volume_3m": "Avg Vol (3M)",
     "avg_volume_10d": "Avg Vol (10D)",
@@ -70,7 +82,8 @@ _DRAWDOWN_COL = "Drawdown %"
 _PRICE_COLS = ("Current Close", "52-Week High", "52-Week Low", "Bid", "Ask", "Bid-Ask Spread")
 _RATIO_COLS = ("P/E Ratio",)
 _PCT_COLS = ("Dividend Yield %", "Spread %")
-_LARGE_NUM_COLS = ("Market Cap", "Avg Vol (3M)", "Avg Vol (10D)", "Avg Daily Value (3M)", "Today's Value")
+_RATIO_COLS_DEBT = ("Debt/Equity (MRQ)", "Net Debt/EBITDA (MRQ/TTM)")
+_LARGE_NUM_COLS = ("Market Cap", "FCF (TTM)", "LFCF (TTM)", "Total Debt (MRQ)", "Net Debt (MRQ)", "Avg Vol (3M)", "Avg Vol (10D)", "Avg Daily Value (3M)", "Today's Value")
 
 
 # ---------------------------------------------------------------------------
@@ -111,6 +124,12 @@ def _apply_number_formats(ws: Worksheet) -> None:
                 cell.number_format = "#,##0.000000"
 
     for col_name in _RATIO_COLS:
+        if col_name in col_index:
+            letter = get_column_letter(col_index[col_name])
+            for cell in ws[letter][1:]:
+                cell.number_format = "0.00"
+
+    for col_name in _RATIO_COLS_DEBT:
         if col_name in col_index:
             letter = get_column_letter(col_index[col_name])
             for cell in ws[letter][1:]:

@@ -31,6 +31,16 @@ class StockResult:
     pe_ratio: float | None = None        # Trailing P/E (price / EPS TTM); may be approximate
     dividend_yield: float | None = None  # Dividend yield % (e.g. 3.5 means 3.5%)
     market_cap: int | None = None        # Market capitalisation in local currency units
+    sector: str | None = None            # e.g. "Financial Services"
+    industry: str | None = None          # e.g. "Banks—Regional"
+    fcf: int | None = None               # Free Cash Flow TTM (op. cash flow − capex)
+    lfcf: int | None = None              # Levered Free Cash Flow TTM (FCF − net debt payments)
+    p_fcf: float | None = None           # Price / FCF = market_cap / fcf
+    p_lfcf: float | None = None          # Price / Levered FCF = market_cap / lfcf
+    total_debt: int | None = None        # Total Debt MRQ (from balance sheet)
+    net_debt: int | None = None          # Net Debt MRQ = totalDebt − totalCash
+    total_debt_to_equity: float | None = None  # Total Debt / Equity MRQ (ratio, e.g. 1.47)
+    net_debt_to_ebitda: float | None = None    # Net Debt MRQ / EBITDA TTM
 
     # --- Liquidity ---
     avg_volume_3m: int | None = None          # Avg daily share volume, 3-month window

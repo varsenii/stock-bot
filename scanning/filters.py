@@ -39,10 +39,15 @@ _FilterSpec = tuple[str, str, str]  # (field, operator, description)
 
 FILTER_REGISTRY: dict[str, _FilterSpec] = {
     # key in scan_config.yaml           yfinance field name                operator  description
-    "min_avg_daily_volume":    ("avgdailyvol3m",                     "gt",   "3-month avg daily volume (min)"),
+    "min_avg_daily_volume":    ("avgdailyvol3m",                    "gt",   "3-month avg daily volume (min)"),
     "max_pe_ratio":            ("peratio.lasttwelvemonths",          "lte",  "P/E ratio TTM (max)"),
+    "min_price":               ("intradayprice",                    "gte",  "Stock price (min)"),
+    "max_price":               ("intradayprice",                    "lte",  "Stock price (max)"),
     "max_price_to_book":       ("pricebookratio.quarterly",          "lte",  "Price-to-book ratio (max)"),
-    "max_debt_to_equity":      ("totaldebtequity.lasttwelvemonths",  "lte",  "Total debt / equity (max)"),
+    "max_debt_to_equity":      ("totaldebtequity.lasttwelvemonths",  "lte",  "Total debt / equity TTM (max)"),
+    "min_fcf":                 ("unleveredfreecashflow.lasttwelvemonths", "gt", "Free Cash Flow TTM (min)"),
+    "min_levered_fcf":         ("leveredfreecashflow.lasttwelvemonths",   "gt", "Levered Free Cash Flow TTM (min)"),
+    "max_net_debt_to_ebitda":  ("netdebtebitda.lasttwelvemonths",    "lte",  "Net Debt / EBITDA TTM (max)"),
     "min_return_on_equity":    ("returnonequity.lasttwelvemonths",   "gte",  "Return on equity (min)"),
     "min_market_cap":          ("intradaymarketcap",                 "gte",  "Market cap (min)"),
     "max_market_cap":          ("intradaymarketcap",                 "lte",  "Market cap (max)"),

@@ -7,57 +7,72 @@ no price-history downloads, minimal rate-limiting risk.
 ## How it works
 
 ```
-Yahoo screener  (server-side filters: region, volume, P/E)
+Yahoo screener  (server-side filters: region, volume, price, P/E, FCF, Net Debt/EBITDA)
       ↓
 Paginated quotes  (250 per page — price, 52w range, fundamentals, liquidity)
       ↓
 Local drawdown filter  (current price / 52w HIGH − 1  ≤  −min_drawdown_pct%)
 Local P/E filter       (discard if EPS unknown or negative)
       ↓
+Parallel Ticker.info   (FCF, LFCF, debt, sector, industry — one call per candidate)
+Local FCF filter       (discard if FCF data unavailable from Ticker.info)
+      ↓
 Excel workbook    (candidates, all scanned, failures)
 ```
 
-1. Sends a filtered screener query to Yahoo Finance.  Region, volume, and P/E
-   filters are evaluated **server-side**.  Results are sorted by the configured
-   `sort.field` before pagination.
-2. Paginates through results (250 per page).  Every quote already contains
-   current price, 52-week range, fundamentals, and liquidity data —
-   **no extra API requests needed**.
+1. Sends a filtered screener query to Yahoo Finance.  Region, volume, price,
+   P/E, FCF > 0, and Net Debt/EBITDA filters are evaluated **server-side**.
+2. Paginates through results (250 per page).  Every quote contains current
+   price, 52-week range, fundamentals, and liquidity data.
 3. Applies the drawdown filter **locally** using `fiftyTwoWeekHighChangePercent`
-   — the precise percentage drop from the **52-week high** (not from 52 weeks
-   ago).  Stocks with unknown P/E are also discarded at this stage.
-4. Writes a single formatted Excel workbook `output/stock_scan_YYYY-MM-DD.xlsx`
-   with three sheets:
-   - **Candidates (≥N% DD)** — stocks meeting the drawdown threshold
-   - **All Scanned** — every stock returned by the screener
-   - **Failures** — empty in screener mode
+   — the precise percentage drop from the **52-week high**.
+   Stocks with unknown P/E are discarded at this stage.
+4. Fetches FCF, LFCF, total debt, net debt, sector, and industry via parallel
+   `Ticker.info` calls for qualifying candidates only.  Stocks with no FCF
+   data from `Ticker.info` are discarded.
+5. Writes a formatted Excel workbook `output/stock_scan_YYYY-MM-DD.xlsx`.
 
 ## Output columns
 
-| Column | Description |
-|---|---|
-| Company Name | Full company name |
-| Symbol | Ticker (e.g. `VOD.L`, `ENEL.MI`) |
-| Latest Price Date | Date of the price data |
-| Current Close | Last closing price |
-| 52-Week High | Highest price in the last 52 weeks |
-| 52-Week Low | Lowest price in the last 52 weeks |
-| Drawdown % | Drop from 52-week high (negative = below high) |
-| P/E Ratio | Trailing P/E computed as `price / EPS TTM` ¹ |
-| Dividend Yield % | Annual dividend yield in % |
-| Market Cap | Market capitalisation in local currency |
-| Avg Vol (3M) | Average daily share volume, 3-month window |
-| Avg Vol (10D) | Average daily share volume, 10-day window |
-| Bid | Best bid price |
-| Ask | Best ask price |
-| Bid-Ask Spread | `ask − bid` (absolute) |
-| Spread % | `(ask − bid) / mid × 100` (relative cost of trading) |
-| Avg Daily Value (3M) | ≈ ADTV in currency: `50-day avg price × 3M avg volume` |
-| Today's Value | `current price × today's volume` |
+| Column | Period | Description |
+|---|---|---|
+| Company Name | — | Full company name |
+| Symbol | — | Ticker (e.g. `VOD.L`, `ENEL.MI`) |
+| Sector | — | e.g. "Basic Materials" |
+| Industry | — | e.g. "Other Industrial Metals & Mining" |
+| Latest Price Date | — | Date of the price data |
+| Current Close | — | Last closing price |
+| 52-Week High | — | Highest price in the last 52 weeks |
+| 52-Week Low | — | Lowest price in the last 52 weeks |
+| Drawdown % | — | Drop from 52-week high (negative = below high) |
+| P/E Ratio | TTM | `price / EPS TTM` ¹ |
+| Dividend Yield % | — | Annual dividend yield in % |
+| Market Cap | — | Market capitalisation in local currency |
+| FCF (TTM) | TTM | Free Cash Flow — operating CF − CapEx |
+| LFCF (TTM) | TTM | Levered FCF — FCF after debt payments |
+| P/FCF | TTM | `market_cap / FCF` (blank if FCF ≤ 0) |
+| P/LFCF | TTM | `market_cap / LFCF` (blank if LFCF ≤ 0) |
+| Total Debt (MRQ) | MRQ | Total interest-bearing debt |
+| Net Debt (MRQ) | MRQ | `totalDebt − totalCash` |
+| Debt/Equity (MRQ) | MRQ | Total debt / equity (ratio, e.g. 1.47) |
+| Net Debt/EBITDA (MRQ/TTM) | Mixed ² | `Net Debt MRQ / EBITDA TTM` |
+| Avg Vol (3M) | 3M avg | Average daily share volume |
+| Avg Vol (10D) | 10D avg | Average daily share volume |
+| Bid | — | Best bid price |
+| Ask | — | Best ask price |
+| Bid-Ask Spread | — | `ask − bid` (absolute) |
+| Spread % | — | `(ask − bid) / mid × 100` |
+| Avg Daily Value (3M) | 3M | ≈ ADTV: `50-day avg price × 3M avg volume` |
+| Today's Value | Today | `current price × today's volume` |
 
-¹ For UK stocks priced in GBp (pence) with EPS in GBP, the P/E may be ~100×
-off. The server-side P/E filter (`max_pe_ratio`) uses Yahoo's correctly-adjusted
-value.
+¹ For UK stocks (GBp vs GBP): the server-side P/E filter uses Yahoo's adjusted
+value; the output column divides the pence price by 100 before computing.
+
+² **Net Debt/EBITDA period mismatch:** the output column uses MRQ net debt
+(balance sheet) divided by TTM EBITDA.  The server-side filter
+(`max_net_debt_to_ebitda`) uses Yahoo's fully TTM-based figure, which is more
+accurate.  A stock may show a slightly different value in the column than the
+filter threshold — the server-side filter is authoritative.
 
 The workbook is formatted with bold headers, frozen panes, alternating row
 fills, number formats per column type, and a green→yellow→red colour scale on
@@ -77,8 +92,11 @@ max_results: 2500          # max tickers to fetch from screener
 min_drawdown_pct: 20       # stocks at least this % below 52-week high
 
 filters:
-  min_avg_daily_volume: 1000   # removes illiquid instruments
-  max_pe_ratio: 20             # set to null to include all companies
+  min_avg_daily_volume: 1000     # removes illiquid instruments
+  max_price: 100                 # price ≤ 100 (note: UK stocks in GBp)
+  max_pe_ratio: 20               # P/E TTM ≤ 20
+  min_fcf: 0                     # FCF (unlevered, TTM) > 0
+  max_net_debt_to_ebitda: 2      # Net Debt/EBITDA TTM ≤ 2×
 
 sort:
   field: avgdailyvol3m    # most liquid stocks fetched first
@@ -89,17 +107,26 @@ output_dir: output
 
 ### Filter keys
 
-| Key | Description | Direction |
-|---|---|---|
-| `min_avg_daily_volume` | 3-month average daily volume | min |
-| `max_pe_ratio` | P/E ratio (trailing twelve months) | max |
-| `max_price_to_book` | Price-to-book ratio | max |
-| `max_debt_to_equity` | Total debt / equity | max |
-| `min_return_on_equity` | Return on equity | min |
-| `min_market_cap` | Market capitalisation | min |
-| `max_market_cap` | Market capitalisation | max |
+| Key | Period | Description | Direction |
+|---|---|---|---|
+| `min_avg_daily_volume` | 3M | 3-month average daily volume | min |
+| `min_price` | — | Stock price | min |
+| `max_price` | — | Stock price | max |
+| `max_pe_ratio` | TTM | P/E ratio | max |
+| `min_fcf` | TTM | Free Cash Flow (unlevered) | min |
+| `min_levered_fcf` | TTM | Levered Free Cash Flow | min |
+| `max_net_debt_to_ebitda` | TTM | Net Debt / EBITDA | max |
+| `max_price_to_book` | Quarterly | Price-to-book ratio | max |
+| `max_debt_to_equity` | TTM | Total debt / equity | max |
+| `min_return_on_equity` | TTM | Return on equity | min |
+| `min_market_cap` | — | Market capitalisation | min |
+| `max_market_cap` | — | Market capitalisation | max |
 
 Set any value to `null` to disable that filter.
+
+> **UK price caveat:** UK stocks (`.L` tickers) are priced in **GBp (pence)**.
+> `max_price: 100` = 100 pence = £1.  To include UK stocks up to £100, use
+> `max_price: 10000`.
 
 ### Sort field options
 
@@ -112,20 +139,17 @@ Set any value to `null` to disable that filter.
 
 ### Understanding `max_results`
 
-The drawdown filter is applied **locally** (not by Yahoo's server), so the
-scanner pages through the screener catalogue to find qualifying stocks.
-`max_results` caps how many tickers are fetched.
+The drawdown filter is applied **locally**, so the scanner pages through the
+screener catalogue.  `max_results` caps how many tickers are fetched.
 
-The screener returns ~6,700 liquid profitable European stocks (with the default
-filters).  At 20% drawdown, roughly 1 in 5 stocks qualify, so:
+With all default filters active, the screener returns a reduced universe.
+At 20% drawdown, roughly 1 in 5 qualifying stocks make the cut, so:
 
-| `max_results` | Tickers scanned | Approx. candidates |
-|---|---|---|
-| 500 | 500 (8%) | ~88 |
-| 2500 | 2,500 (37%) | ~440 |
-| 7000 | 6,700 (100%) | ~1,200 |
-
-Set `max_results: 7000` to scan the entire available catalogue.
+| `max_results` | Approx. candidates |
+|---|---|
+| 500 | ~50–100 |
+| 2500 | ~250–500 |
+| 7000 | all available |
 
 ## Project structure
 
@@ -153,39 +177,35 @@ stock_bot/
 
 ## Important limitations
 
-- Yahoo Finance's screener endpoint is **unofficial** for this use.
+- Yahoo Finance's screener endpoint is **unofficial**.
   The API can change, rate-limit, or block automated requests at any time.
-- The drawdown filter is applied **locally** using `fiftyTwoWeekHighChangePercent`
-  (drop from the 52-week high).  There is no server-side drawdown filter.
+- The drawdown filter is applied **locally** using `fiftyTwoWeekHighChangePercent`.
   Increase `max_results` to scan more of the catalogue.
-- **P/E Ratio** in the output is computed locally as `price / EPS TTM` and
-  may be inaccurate for UK stocks (GBp vs GBP currency mismatch).
-- **Avg Daily Value** is an approximation: `50-day avg price × 3-month avg volume`.
-  It is not a direct market data point.
-- **Bid/Ask/Spread** are delayed (15 min for most European exchanges) and may
-  not be available after market close.
-- `eu` expands to 24 individual country codes.  This is not a certified
-  complete directory of every European listing.
+- **P/E Ratio** in the output is computed as `price / EPS TTM` and may be
+  inaccurate for UK stocks (GBp vs GBP).  The server-side filter is accurate.
+- **UK price filter:** `max_price` applies to the raw price field.  UK stocks
+  are in GBp, so `max_price: 100` = 100 pence, not £100.
+- **Net Debt/EBITDA column** uses MRQ net debt; the filter uses TTM net debt.
+  These can differ when a company's balance sheet changed recently.
+- **Avg Daily Value** is an approximation: `50-day avg price × 3M avg volume`.
+- **Bid/Ask/Spread** are delayed (15 min) and may not be available after close.
 - Intended for personal research.  Verify candidates with your broker.
-  Check data providers' terms before commercial use.
 
 ## Setup
-
-Use Python 3.10 or newer.
-
-**Windows (PowerShell)**
-
-```powershell
-py -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-```
 
 **Linux / macOS**
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+**Windows (PowerShell)**
+
+```powershell
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
 
@@ -233,24 +253,26 @@ python cli.py --symbols-file my_symbols.csv   # bypasses screener
 
 ### Adding a new data provider
 
-1. Subclass `UniverseProvider` / `PriceProvider` in a new file under `scanning/providers/`.
-2. Override `get_precomputed_results()` to return `StockResult` objects directly.
+1. Subclass `UniverseProvider` / `PriceProvider` in `scanning/providers/`.
+2. Override `get_precomputed_results()` to return `StockResult` objects.
 3. Replace `YahooProvider()` in `cli.py`.
-
-### Adding a new output format
-
-1. Subclass `BaseExporter` in a new file under `scanning/exporters/`.
-2. Register it in `scanning/exporters/__init__.py`.
-3. Replace `ExcelExporter()` in `cli.py`.
 
 ## Calculation notes
 
-| Column | Formula |
+| Column | Formula / Source |
 |---|---|
 | Drawdown % | `fiftyTwoWeekHighChangePercent × 100` |
-| P/E Ratio | `regularMarketPrice / epsTrailingTwelveMonths` |
+| P/E Ratio | `price_in_reporting_currency / epsTrailingTwelveMonths` |
 | Dividend Yield % | `dividendYield` (already in %, e.g. `7.60` = 7.60%) |
 | Market Cap | `marketCap` in local currency units |
+| FCF (TTM) | `freeCashflow` from `Ticker.info` (unlevered, TTM) |
+| LFCF (TTM) | `leveredFreeCashFlow` from `Ticker.info` (TTM) |
+| P/FCF | `marketCap / FCF` |
+| P/LFCF | `marketCap / LFCF` |
+| Total Debt (MRQ) | `totalDebt` from `Ticker.info` (MRQ) |
+| Net Debt (MRQ) | `totalDebt − totalCash` (both MRQ) |
+| Debt/Equity (MRQ) | `debtToEquity / 100` (MRQ, converted from %) |
+| Net Debt/EBITDA (MRQ/TTM) | `(totalDebt − totalCash) / ebitda` |
 | Avg Daily Value (3M) | `fiftyDayAverage × averageDailyVolume3Month` |
 | Today's Value | `regularMarketPrice × regularMarketVolume` |
 | Bid-Ask Spread | `ask − bid` |
@@ -258,7 +280,6 @@ python cli.py --symbols-file my_symbols.csv   # bypasses screener
 
 ## Suggested next versions
 
-- Fundamental filters (P/FCF, revenue trend, margins, Altman Z-score).
 - Persistent cache to avoid re-querying unchanged data daily.
 - Second independent data source for cross-verification.
 - Alert only when a symbol **newly** crosses the threshold.

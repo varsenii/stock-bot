@@ -219,14 +219,17 @@ def _paginated_screener(
                 if drawdown_pct > -abs(min_drawdown):
                     continue  # Doesn't actually meet the drawdown threshold
 
-                # P/E: computed from price / EPS TTM (may be approximate due to
-                # currency-unit differences on some cross-listed stocks).
-                # Discard stocks where P/E cannot be determined (missing EPS or
-                # loss-making companies that slipped through the server-side filter).
+                # P/E: computed from price / EPS TTM.
+                # UK stocks trade in GBp (pence) while EPS is reported in GBP
+                # (pounds). Dividing by 100 brings both to the same unit.
+                # Discard stocks where P/E cannot be determined.
                 eps = q.get("epsTrailingTwelveMonths")
                 pe_ratio: float | None = None
                 if eps is not None and float(eps) > 0 and current_close > 0:
-                    pe_ratio = round(current_close / float(eps), 2)
+                    price_for_pe = current_close
+                    if q.get("currency") == "GBp":
+                        price_for_pe = current_close / 100.0  # pence → pounds
+                    pe_ratio = round(price_for_pe / float(eps), 2)
 
                 if pe_ratio is None:
                     continue  # unknown P/E — discard
@@ -364,6 +367,121 @@ def _fetch_names_fallback(symbols: list[str], max_workers: int = 10) -> dict[str
         return {futures[f]: f.result() for f in as_completed(futures)}
 
 
+def _fetch_fcf(symbol: str) -> dict:
+    """
+    Fetch cash-flow, debt, sector, and industry for a single symbol via
+    ``yf.Ticker.info``.  Returns a dict or empty dict on failure.
+    """
+    try:
+        info = yf.Ticker(symbol).info
+        return {
+            # Cash flow (TTM)
+            "fcf": info.get("freeCashflow"),          # op. CF − capex (TTM)
+            "lfcf": info.get("leveredFreeCashFlow"),   # FCF − net debt payments (TTM)
+            # Debt (MRQ balance sheet)
+            "total_debt": info.get("totalDebt"),       # total interest-bearing debt (MRQ)
+            "total_cash": info.get("totalCash"),       # cash & equivalents (MRQ)
+            "debt_to_equity": info.get("debtToEquity"),  # % (MRQ), e.g. 147.7 = 1.477×
+            # EBITDA for Net Debt/EBITDA ratio (TTM)
+            "ebitda": info.get("ebitda"),
+            # Classification
+            "sector": info.get("sector"),
+            "industry": info.get("industry"),
+        }
+    except Exception:
+        return {}
+
+
+def _enrich_with_fcf(
+    results: list[StockResult],
+    max_workers: int = 15,
+) -> list[StockResult]:
+    """
+    Fetch FCF metrics for all *results* in parallel and return a new list of
+    ``StockResult`` objects enriched with ``fcf``, ``lfcf``, ``p_fcf``,
+    ``p_lfcf``.
+
+    Uses ``yf.Ticker.info`` (one HTTP request per symbol) with a thread pool
+    to minimise wall-clock time.
+    """
+    if not results:
+        return results
+
+    symbols = [r.symbol for r in results]
+    logging.info("Fetching FCF data for %d candidates (parallel)...", len(symbols))
+
+    with ThreadPoolExecutor(max_workers=min(max_workers, len(symbols))) as pool:
+        futures = {pool.submit(_fetch_fcf, sym): sym for sym in symbols}
+        fcf_map: dict[str, dict] = {
+            futures[f]: f.result() for f in as_completed(futures)
+        }
+
+    enriched: list[StockResult] = []
+    discarded = 0
+    for r in results:
+        data = fcf_map.get(r.symbol, {})
+        fcf_raw = data.get("fcf")
+        lfcf_raw = data.get("lfcf")
+
+        fcf = int(fcf_raw) if fcf_raw is not None else None
+        lfcf = int(lfcf_raw) if lfcf_raw is not None else None
+
+        # Discard stocks where FCF is unknown (data unavailable).
+        # Stocks with negative FCF are kept — they appear with blank P/FCF.
+        if fcf is None:
+            discarded += 1
+            continue
+
+        p_fcf: float | None = None
+        if fcf > 0 and r.market_cap is not None and r.market_cap > 0:
+            p_fcf = round(r.market_cap / fcf, 2)
+
+        p_lfcf: float | None = None
+        if lfcf is not None and lfcf > 0 and r.market_cap is not None and r.market_cap > 0:
+            p_lfcf = round(r.market_cap / lfcf, 2)
+
+        sector = data.get("sector") or None
+        industry = data.get("industry") or None
+
+        # --- Debt metrics (MRQ) ---
+        total_debt_raw = data.get("total_debt")
+        total_cash_raw = data.get("total_cash")
+        total_debt = int(total_debt_raw) if total_debt_raw is not None else None
+
+        net_debt: int | None = None
+        if total_debt is not None and total_cash_raw is not None:
+            net_debt = int(total_debt_raw) - int(total_cash_raw)
+
+        # debtToEquity is returned as % (e.g. 147.7 → ratio 1.477)
+        dte_raw = data.get("debt_to_equity")
+        total_debt_to_equity = round(float(dte_raw) / 100.0, 4) if dte_raw is not None else None
+
+        # Net Debt MRQ / EBITDA TTM
+        ebitda_raw = data.get("ebitda")
+        net_debt_to_ebitda: float | None = None
+        if net_debt is not None and ebitda_raw is not None and float(ebitda_raw) > 0:
+            net_debt_to_ebitda = round(net_debt / float(ebitda_raw), 2)
+
+        enriched.append(dataclasses.replace(
+            r,
+            sector=sector,
+            industry=industry,
+            fcf=fcf,
+            lfcf=lfcf,
+            p_fcf=p_fcf,
+            p_lfcf=p_lfcf,
+            total_debt=total_debt,
+            net_debt=net_debt,
+            total_debt_to_equity=total_debt_to_equity,
+            net_debt_to_ebitda=net_debt_to_ebitda,
+        ))
+
+    if discarded:
+        logging.info("Discarded %d stocks with unknown FCF.", discarded)
+
+    return enriched
+
+
 # ---------------------------------------------------------------------------
 # Provider implementations
 # ---------------------------------------------------------------------------
@@ -457,7 +575,8 @@ class YahooUniverseProvider(UniverseProvider):
             len(symbols),
             len(results),
         )
-        return results
+        # Enrich candidates with FCF data (parallel Ticker.info calls).
+        return _enrich_with_fcf(results)
 
 
 class YahooPriceProvider(PriceProvider):
