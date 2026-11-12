@@ -39,6 +39,7 @@ class StockResult:
     p_fcf: float | None = None           # Price / FCF = market_cap / fcf
     p_lfcf: float | None = None          # Price / Levered FCF = market_cap / lfcf
     fcf_cagr: float | None = None        # FCF CAGR % over available positive history
+    fcf_cv: float | None = None          # FCF Coefficient of Variation % = (std / mean) × 100
     total_debt: int | None = None        # Total Debt MRQ (from balance sheet)
     net_debt: int | None = None          # Net Debt MRQ = totalDebt − totalCash
     total_debt_to_equity: float | None = None  # Total Debt / Equity MRQ (ratio, e.g. 1.47)

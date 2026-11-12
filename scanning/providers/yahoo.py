@@ -370,6 +370,27 @@ def _fetch_names_fallback(symbols: list[str], max_workers: int = 10) -> dict[str
         return {futures[f]: f.result() for f in as_completed(futures)}
 
 
+def _compute_fcf_cv(fcf_series: "pd.Series") -> float | None:
+    """
+    Compute the Coefficient of Variation (CV%) for the FCF series.
+
+    CV% = (sample std dev / mean) × 100
+
+    Uses all available non-NaN data points (including negative years).
+    Returns None if:
+    - fewer than 2 data points (can't compute std dev)
+    - the mean is ≤ 0 (CV would be undefined or misleading)
+    """
+    clean = fcf_series.dropna()
+    if len(clean) < 2:
+        return None
+    mean = float(clean.mean())
+    if mean <= 0:
+        return None
+    std = float(clean.std(ddof=1))   # sample std dev
+    return round(std / mean * 100, 2)
+
+
 def _compute_fcf_cagr(fcf_series: "pd.Series") -> float | None:
     """
     Compute annualised FCF CAGR (%) from a historical annual FCF Series.
@@ -506,14 +527,19 @@ def _enrich_with_fcf(
         if net_debt is not None and ebitda_raw is not None and float(ebitda_raw) > 0:
             net_debt_to_ebitda = round(net_debt / float(ebitda_raw), 2)
 
-        # --- FCF CAGR (from historical annual cash flow) ---
+        # --- FCF CAGR and CV (from historical annual cash flow) ---
         fcf_series = data.get("fcf_series")
         fcf_cagr: float | None = None
+        fcf_cv: float | None = None
         if fcf_series is not None:
             try:
                 fcf_cagr = _compute_fcf_cagr(fcf_series)
             except Exception:
                 fcf_cagr = None
+            try:
+                fcf_cv = _compute_fcf_cv(fcf_series)
+            except Exception:
+                fcf_cv = None
 
         # Local FCF CAGR filter.
         # Only discard if CAGR is computable AND below the threshold.
@@ -532,6 +558,7 @@ def _enrich_with_fcf(
             p_fcf=p_fcf,
             p_lfcf=p_lfcf,
             fcf_cagr=fcf_cagr,
+            fcf_cv=fcf_cv,
             total_debt=total_debt,
             net_debt=net_debt,
             total_debt_to_equity=total_debt_to_equity,
