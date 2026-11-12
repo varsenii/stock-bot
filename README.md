@@ -52,28 +52,41 @@ Excel workbook    (candidates, all scanned, failures)
 | 11 | P/E Ratio | TTM | `price / EPS TTM` ² |
 | 12 | Dividend Yield % | — | Annual dividend yield in % |
 | 13 | Market Cap | — | Market capitalisation in local currency |
-| 14 | FCF (TTM) | TTM | Free Cash Flow — operating CF − CapEx |
-| 15 | LFCF (TTM) | TTM | Levered FCF — FCF after debt payments |
-| 16 | P/FCF | TTM | `market_cap / FCF` (blank if FCF ≤ 0) |
-| 17 | P/LFCF | TTM | `market_cap / LFCF` (blank if LFCF ≤ 0) |
-| 18 | **FCF CAGR %** | Multi-yr | Annualised FCF growth rate ³ |
-| 19 | Total Debt (MRQ) | MRQ | Total interest-bearing debt |
-| 20 | Net Debt (MRQ) | MRQ | `totalDebt − totalCash` |
-| 21 | Debt/Equity (MRQ) | MRQ | Total debt / equity (ratio, e.g. 1.47) |
-| 22 | Net Debt/EBITDA (MRQ/TTM) | Mixed ⁴ | `Net Debt MRQ / EBITDA TTM` |
-| 23 | Avg Vol (3M) | 3M avg | Average daily share volume |
-| 24 | Avg Vol (10D) | 10D avg | Average daily share volume |
-| 25 | Bid | — | Best bid price |
-| 26 | Ask | — | Best ask price |
-| 27 | Bid-Ask Spread | — | `ask − bid` (absolute) |
-| 28 | Spread % | — | `(ask − bid) / mid × 100` |
-| 29 | Avg Daily Value (3M) | 3M | ≈ ADTV: `50-day avg price × 3M avg volume` |
-| 30 | Today's Value | Today | `current price × today's volume` |
+| 14 | **Last Earnings** | — | Date of the most recent earnings announcement (blank if in the future) |
+| 15 | **Next Earnings** | — | Date of the next expected earnings announcement (blank if already past) |
+| 16 | **Est.** | — | `True` if the next earnings date is an estimate, `False` if confirmed |
+| 17 | FCF (TTM) | TTM | Free Cash Flow — operating CF − CapEx |
+| 18 | LFCF (TTM) | TTM | Levered FCF — FCF after debt payments |
+| 19 | P/FCF | TTM | `market_cap / FCF` (blank if FCF ≤ 0) |
+| 20 | P/LFCF | TTM | `market_cap / LFCF` (blank if LFCF ≤ 0) |
+| 21 | **FCF CAGR %** | Multi-yr | Annualised FCF growth rate ³ |
+| 22 | FCF CV % | Multi-yr | FCF Coefficient of Variation — `(std / mean) × 100` |
+| 23 | FCF Decline Streak | Multi-yr | Consecutive annual FCF declines (0 = growing) |
+| 24 | **Rev CAGR %** | Multi-yr | Total Revenue CAGR — annualised top-line growth ⁵ |
+| 25 | Rev CV % | Multi-yr | Revenue Coefficient of Variation — revenue stability |
+| 26 | Rev Decline Streak | Multi-yr | Consecutive annual Revenue declines |
+| 27 | Total Debt (MRQ) | MRQ | Total interest-bearing debt |
+| 28 | Net Debt (MRQ) | MRQ | `totalDebt − totalCash` |
+| 29 | Debt/Equity (MRQ) | MRQ | Total debt / equity (ratio, e.g. 1.47) |
+| 30 | Net Debt/EBITDA (MRQ/TTM) | Mixed ⁴ | `Net Debt MRQ / EBITDA TTM` |
+| 31 | Avg Vol (3M) | 3M avg | Average daily share volume |
+| 32 | Avg Vol (10D) | 10D avg | Average daily share volume |
+| 33 | Bid | — | Best bid price |
+| 34 | Ask | — | Best ask price |
+| 35 | Bid-Ask Spread | — | `ask − bid` (absolute) |
+| 36 | Spread % | — | `(ask − bid) / mid × 100` |
+| 37 | Avg Daily Value (3M) | 3M | ≈ ADTV: `50-day avg price × 3M avg volume` |
+| 38 | Today's Value | Today | `current price × today's volume` |
 
 ¹ `GBp` = British pence (UK stocks). Price in pence, not pounds.
 
 ² For UK stocks (GBp vs GBP): the server-side P/E filter uses Yahoo's adjusted
 value; the output column divides the pence price by 100 before computing.
+
+⁵ **Revenue CAGR:** same formula as FCF CAGR but applied to Total Revenue from
+the annual income statement.  Revenue is always positive so CAGR is almost
+always computable.  Unlike FCF, Revenue CAGR does not go blank due to negative
+values — only if fewer than 2 years of data are available.
 
 ³ **FCF CAGR:** `(FCF_last / FCF_first)^(1/n_years) − 1`.  Computed from the
 oldest to most recent fiscal year in the annual cash flow statement (up to 5
@@ -293,6 +306,11 @@ python cli.py --symbols-file my_symbols.csv   # bypasses screener
 | P/FCF | `marketCap / FCF` |
 | P/LFCF | `marketCap / LFCF` |
 | FCF CAGR % | `(FCF_last / FCF_first)^(1/n_years) − 1` × 100; blank if either endpoint ≤ 0 |
+| FCF CV % | `(sample std dev / mean) × 100` over available FCF history |
+| FCF Decline Streak | Count of consecutive year-over-year FCF declines ending at most recent year |
+| Rev CAGR % | `(Rev_last / Rev_first)^(1/n_years) − 1` × 100 (Total Revenue, annual) |
+| Rev CV % | `(sample std dev / mean) × 100` over available Revenue history |
+| Rev Decline Streak | Count of consecutive year-over-year Revenue declines |
 | Total Debt (MRQ) | `totalDebt` from `Ticker.info` (MRQ) |
 | Net Debt (MRQ) | `totalDebt − totalCash` (both MRQ) |
 | Debt/Equity (MRQ) | `debtToEquity / 100` (MRQ, converted from %) |

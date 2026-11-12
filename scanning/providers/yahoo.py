@@ -397,6 +397,34 @@ def _fetch_names_fallback(symbols: list[str], max_workers: int = 10) -> dict[str
         return {futures[f]: f.result() for f in as_completed(futures)}
 
 
+def _compute_fcf_decline_streak(fcf_series: "pd.Series") -> int | None:
+    """
+    Count consecutive annual FCF declines ending at the most recent year.
+
+    Walks backwards from the latest year:
+    - 0  → FCF grew (or was flat) in the most recent year-over-year period
+    - 1  → one year of decline
+    - 2  → two consecutive years of decline
+    - etc.
+
+    Returns None if fewer than 2 data points are available.
+    NaN years are skipped (not counted as decline or growth).
+    """
+    clean = fcf_series.dropna().sort_index()   # oldest first
+    if len(clean) < 2:
+        return None
+
+    streak = 0
+    # Walk from most recent backwards
+    values = list(clean.values)
+    for i in range(len(values) - 1, 0, -1):
+        if values[i] < values[i - 1]:
+            streak += 1
+        else:
+            break   # streak broken
+    return streak
+
+
 def _compute_fcf_cv(fcf_series: "pd.Series") -> float | None:
     """
     Compute the Coefficient of Variation (CV%) for the FCF series.
@@ -464,11 +492,27 @@ def _fetch_fcf(symbol: str) -> dict:
         except Exception:
             fcf_series = None
 
+        # Historical annual Total Revenue for revenue metrics
+        try:
+            stmt = ticker.income_stmt
+            if not stmt.empty:
+                rev_row = next(
+                    (r for r in ("Total Revenue", "Revenue", "Net Revenue")
+                     if r in stmt.index),
+                    None,
+                )
+                revenue_series = stmt.loc[rev_row] if rev_row else None
+            else:
+                revenue_series = None
+        except Exception:
+            revenue_series = None
+
         return {
             # Cash flow (TTM)
             "fcf": info.get("freeCashflow"),          # op. CF − capex (TTM)
             "lfcf": info.get("leveredFreeCashFlow"),   # FCF − net debt payments (TTM)
             "fcf_series": fcf_series,                  # pd.Series of annual FCF
+            "revenue_series": revenue_series,          # pd.Series of annual Total Revenue
             # Debt (MRQ balance sheet)
             "total_debt": info.get("totalDebt"),       # total interest-bearing debt (MRQ)
             "total_cash": info.get("totalCash"),       # cash & equivalents (MRQ)
@@ -554,10 +598,11 @@ def _enrich_with_fcf(
         if net_debt is not None and ebitda_raw is not None and float(ebitda_raw) > 0:
             net_debt_to_ebitda = round(net_debt / float(ebitda_raw), 2)
 
-        # --- FCF CAGR and CV (from historical annual cash flow) ---
+        # --- FCF CAGR, CV, and decline streak (from historical annual cash flow) ---
         fcf_series = data.get("fcf_series")
         fcf_cagr: float | None = None
         fcf_cv: float | None = None
+        fcf_decline_streak: int | None = None
         if fcf_series is not None:
             try:
                 fcf_cagr = _compute_fcf_cagr(fcf_series)
@@ -567,6 +612,29 @@ def _enrich_with_fcf(
                 fcf_cv = _compute_fcf_cv(fcf_series)
             except Exception:
                 fcf_cv = None
+            try:
+                fcf_decline_streak = _compute_fcf_decline_streak(fcf_series)
+            except Exception:
+                fcf_decline_streak = None
+
+        # --- Revenue CAGR, CV, and decline streak (from annual income statement) ---
+        revenue_series = data.get("revenue_series")
+        revenue_cagr: float | None = None
+        revenue_cv: float | None = None
+        revenue_decline_streak: int | None = None
+        if revenue_series is not None:
+            try:
+                revenue_cagr = _compute_fcf_cagr(revenue_series)      # same formula
+            except Exception:
+                revenue_cagr = None
+            try:
+                revenue_cv = _compute_fcf_cv(revenue_series)           # same formula
+            except Exception:
+                revenue_cv = None
+            try:
+                revenue_decline_streak = _compute_fcf_decline_streak(revenue_series)
+            except Exception:
+                revenue_decline_streak = None
 
         # Local FCF CAGR filter.
         # Only discard if CAGR is computable AND below the threshold.
@@ -586,6 +654,10 @@ def _enrich_with_fcf(
             p_lfcf=p_lfcf,
             fcf_cagr=fcf_cagr,
             fcf_cv=fcf_cv,
+            fcf_decline_streak=fcf_decline_streak,
+            revenue_cagr=revenue_cagr,
+            revenue_cv=revenue_cv,
+            revenue_decline_streak=revenue_decline_streak,
             total_debt=total_debt,
             net_debt=net_debt,
             total_debt_to_equity=total_debt_to_equity,

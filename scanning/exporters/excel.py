@@ -69,6 +69,10 @@ _COLUMN_LABELS: dict[str, str] = {
     "p_lfcf": "P/LFCF",
     "fcf_cagr": "FCF CAGR %",
     "fcf_cv": "FCF CV %",
+    "fcf_decline_streak": "FCF Decline Streak",
+    "revenue_cagr": "Rev CAGR %",
+    "revenue_cv": "Rev CV %",
+    "revenue_decline_streak": "Rev Decline Streak",
     # Debt (MRQ balance sheet, except net_debt_to_ebitda which is MRQ/TTM)
     "total_debt": "Total Debt (MRQ)",
     "net_debt": "Net Debt (MRQ)",
@@ -89,7 +93,7 @@ _DRAWDOWN_COL = "Drawdown %"
 _PRICE_COLS = ("Current Close", "52-Week High", "52-Week Low", "Bid", "Ask", "Bid-Ask Spread")
 _RATIO_COLS = ("P/E Ratio",)
 _PCT_COLS = ("Dividend Yield %", "Spread %")
-_RATIO_COLS_FCF = ("P/FCF", "P/LFCF", "FCF CAGR %", "FCF CV %")
+_RATIO_COLS_FCF = ("P/FCF", "P/LFCF", "FCF CAGR %", "FCF CV %", "Rev CAGR %", "Rev CV %")
 _RATIO_COLS_DEBT = ("Debt/Equity (MRQ)", "Net Debt/EBITDA (MRQ/TTM)")
 _LARGE_NUM_COLS = ("Market Cap", "FCF (TTM)", "LFCF (TTM)", "Total Debt (MRQ)", "Net Debt (MRQ)", "Avg Vol (3M)", "Avg Vol (10D)", "Avg Daily Value (3M)", "Today's Value")
 
