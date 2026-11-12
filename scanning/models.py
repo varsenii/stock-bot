@@ -34,6 +34,9 @@ class StockResult:
     market_cap: int | None = None        # Market capitalisation in local currency units
     sector: str | None = None            # e.g. "Financial Services"
     industry: str | None = None          # e.g. "Banks—Regional"
+    last_earnings_date: str | None = None    # ISO date of last earnings announcement
+    next_earnings_date: str | None = None    # ISO date of next expected earnings
+    is_earnings_estimate: bool | None = None # True if next earnings date is an estimate
     fcf: int | None = None               # Free Cash Flow TTM (op. cash flow − capex)
     lfcf: int | None = None              # Levered Free Cash Flow TTM (FCF − net debt payments)
     p_fcf: float | None = None           # Price / FCF = market_cap / fcf

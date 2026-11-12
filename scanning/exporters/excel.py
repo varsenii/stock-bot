@@ -58,6 +58,10 @@ _COLUMN_LABELS: dict[str, str] = {
     "pe_ratio": "P/E Ratio",
     "dividend_yield": "Dividend Yield %",
     "market_cap": "Market Cap",
+    # Earnings dates (from screener quote)
+    "last_earnings_date": "Last Earnings",
+    "next_earnings_date": "Next Earnings",
+    "is_earnings_estimate": "Est.",
     # Cash flow (TTM)
     "fcf": "FCF (TTM)",
     "lfcf": "LFCF (TTM)",

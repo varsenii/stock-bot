@@ -273,6 +273,30 @@ def _paginated_screener(
 
                 currency = q.get("currency") or None
 
+                # --- Earnings dates (from screener quote — no extra call) ---
+                def _ts_to_date(ts) -> str | None:
+                    """Convert a Unix timestamp to an ISO date string."""
+                    try:
+                        return pd.Timestamp(int(ts), unit="s").date().isoformat()
+                    except Exception:
+                        return None
+
+                last_earn_ts = q.get("earningsTimestamp")
+                next_earn_ts = q.get("earningsTimestampStart")
+                is_estimate_raw = q.get("isEarningsDateEstimate")
+
+                last_earnings_date = _ts_to_date(last_earn_ts)
+                next_earnings_date = _ts_to_date(next_earn_ts)
+                is_earnings_estimate = bool(is_estimate_raw) if is_estimate_raw is not None else None
+
+                # Sanity checks: last earnings should be in the past (≤ today);
+                # next earnings should be in the future (≥ today).
+                if last_earnings_date is not None and last_earnings_date > today:
+                    last_earnings_date = None
+                if next_earnings_date is not None and next_earnings_date < today:
+                    next_earnings_date = None
+                    is_earnings_estimate = None
+
                 results.append(
                     StockResult(
                         name=name,
@@ -286,6 +310,9 @@ def _paginated_screener(
                         pe_ratio=pe_ratio,
                         dividend_yield=dividend_yield,
                         market_cap=market_cap,
+                        last_earnings_date=last_earnings_date,
+                        next_earnings_date=next_earnings_date,
+                        is_earnings_estimate=is_earnings_estimate,
                         avg_volume_3m=avg_volume_3m,
                         avg_volume_10d=avg_volume_10d,
                         bid=bid,
