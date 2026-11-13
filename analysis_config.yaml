@@ -1,0 +1,67 @@
+# =============================================================================
+# Stock Analysis Configuration
+# Controls the LLM-powered "why did the price drop?" pipeline.
+# =============================================================================
+
+
+# --- LLM settings ------------------------------------------------------------
+llm:
+  # Provider: ollama  (add more backends in analysis/llm/)
+  provider: ollama
+
+  # Model name as known by Ollama.  Must be pulled first:
+  #   ollama pull qwen3:8b
+  #
+  # Recommended models for NVIDIA RTX 3080 Laptop (16 GB VRAM):
+  #   qwen3:8b       ~5 GB VRAM — good reasoning, fast
+  #   qwen3:14b      ~9 GB VRAM — stronger reasoning, still fits
+  #   mistral-nemo   ~8 GB VRAM — good alternative
+  #   llama3.1:8b    ~5 GB VRAM — if you need maximum VRAM headroom
+  model: qwen3:8b
+
+  # Ollama server URL (local by default).
+  host: http://localhost:11434
+
+  # Generation parameters.
+  temperature: 0.3
+  num_predict: 2048
+
+  # Context window in tokens.  Search results can be large, so a
+  # generous context helps the model see all the evidence.
+  num_ctx: 32768
+
+
+# --- Web search ---------------------------------------------------------------
+search:
+  # Provider: duckduckgo  (free, no API key needed)
+  provider: duckduckgo
+
+  # Maximum search results to fetch per company (news + web combined).
+  max_results: 8
+
+  # Search region.  wt-wt = worldwide.
+  region: wt-wt
+
+
+# --- Analysis -----------------------------------------------------------------
+analysis:
+  # How many records from the scan output to process.
+  # Set to null (or remove entirely) to process ALL entries.
+  max_records: null
+
+  # Directory containing scan output files (.xlsx).
+  input_dir: output
+
+  # Directory where markdown reports will be written.
+  # Each report is named:  <Company_Name>_<TICKER>.md
+  output_dir: reports
+
+
+# --- Prompt overrides ---------------------------------------------------------
+# Override the built-in system prompt for any analyst role.
+# Uncomment and edit to customise.
+#
+# prompts:
+#   price_decline_analyst:
+#     system: |
+#       You are a financial analyst.  …your custom instructions here…

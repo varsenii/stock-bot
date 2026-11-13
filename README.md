@@ -1,10 +1,61 @@
-# European Stock Scanner — v2
+# Stock Bot
 
-A daily end-of-day scanner that finds European/UK shares trading at least 20%
-below their 52-week high.  It runs entirely from Yahoo Finance's screener API —
-no price-history downloads, minimal rate-limiting risk.
+A daily European/UK stock scanner with LLM-powered price-decline analysis.
 
-## How it works
+1. **Scan** — finds stocks trading ≥ 20 % below their 52-week high using Yahoo
+   Finance's screener API.
+2. **Analyse** — for each candidate, searches the web (DuckDuckGo) for recent
+   news and asks a local LLM (Ollama) to explain why the price dropped.
+   Results are written as per-company markdown reports.
+
+## Quick start (Docker)
+
+```bash
+# 1. Build the image (installs Python deps + Ollama)
+./docker/build.sh
+
+# 2. Enter the container (starts Ollama, pulls the model on first run)
+./docker/run.sh
+
+# Inside the container:
+python3 __main__.py scan                     # run the screener
+python3 __main__.py analyze                  # analyse all candidates
+python3 __main__.py analyze --max-records 5  # analyse the first 5 only
+```
+
+The container mounts the project directory, so code edits are reflected
+immediately — no rebuild needed (only rebuild after `requirements.txt`
+changes).
+
+### What happens on `./docker/run.sh`
+
+1. Ollama server starts in the background.
+2. The model from `analysis_config.yaml` is pulled if not already cached
+   (stored in a Docker volume, so it's a one-time download).
+3. You're dropped into an interactive bash shell.
+
+### GPU access
+
+`run.sh` passes `--gpus all` to Docker.
+[NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)
+must be installed on the host.
+
+## Quick start (venv)
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
+# Install Ollama (https://ollama.com/download)
+curl -fsSL https://ollama.com/install.sh | sh
+ollama pull qwen3:8b
+
+python3 __main__.py scan
+python3 __main__.py analyze
+```
+
+## How the scanner works
 
 ```
 Yahoo screener  (server-side filters: region, volume, price, P/E, FCF, Net Debt/EBITDA)
@@ -14,315 +65,241 @@ Paginated quotes  (250 per page — price, 52w range, fundamentals, liquidity)
 Local drawdown filter  (current price / 52w HIGH − 1  ≤  −min_drawdown_pct%)
 Local P/E filter       (discard if EPS unknown or negative)
       ↓
-Parallel Ticker.info   (FCF, LFCF, historical FCF, debt, sector, industry — one call per candidate)
-Local FCF filter       (discard if TTM FCF data unavailable)
-Local FCF CAGR filter  (discard if CAGR < min_fcf_cagr and CAGR is computable)
+Parallel Ticker.info   (FCF, LFCF, historical FCF, debt, sector, industry)
+Local FCF filter       (discard if TTM FCF unavailable)
+Local FCF CAGR filter  (discard if CAGR < min_fcf_cagr)
       ↓
-Excel workbook    (candidates, all scanned, failures)
+Excel workbook  →  output/stock_scan_YYYY-MM-DD.xlsx
 ```
 
-1. Sends a filtered screener query to Yahoo Finance.  Region, volume, price,
-   P/E, FCF > 0, and Net Debt/EBITDA filters are evaluated **server-side**.
-2. Paginates through results (250 per page).  Every quote contains current
-   price, currency, 52-week range, fundamentals, and liquidity data.
-3. Applies the drawdown filter **locally** using `fiftyTwoWeekHighChangePercent`
-   (precise drop from the 52-week high).  Stocks with unknown P/E are discarded.
-4. Fetches FCF, Levered FCF, historical annual FCF (for CAGR), total debt,
-   net debt, sector, and industry via parallel `Ticker.info` calls.
-   Stocks with no TTM FCF data are discarded.
-5. Optionally discards stocks where the FCF CAGR is computable and below the
-   configured threshold (stocks with a negative first/last FCF are kept — CAGR
-   is undefined for them).
-6. Writes a formatted Excel workbook `output/stock_scan_YYYY-MM-DD.xlsx`.
+## How the analyser works
 
-## Output columns
+```
+Latest .xlsx from output/
+      ↓
+For each candidate:
+      ↓
+DuckDuckGo search  (news + web results for "{company} {ticker} stock decline")
+      ↓
+Prompt = stock data + search results
+      ↓
+Local LLM (Ollama, qwen3:8b)  →  structured analysis
+      ↓
+Markdown report  →  reports/<Company_Name>_<TICKER>.md
+```
 
-| # | Column | Period | Description |
-|---|---|---|---|
-| 1 | Company Name | — | Full company name |
-| 2 | Symbol | — | Ticker (e.g. `VOD.L`, `ENEL.MI`) |
-| 3 | **Currency** | — | Trading currency (e.g. `EUR`, `GBp`, `NOK`) ¹ |
-| 4 | Sector | — | e.g. "Basic Materials" |
-| 5 | Industry | — | e.g. "Other Industrial Metals & Mining" |
-| 6 | Latest Price Date | — | Date of the price data |
-| 7 | Current Close | — | Last closing price |
-| 8 | 52-Week High | — | Highest price in the last 52 weeks |
-| 9 | 52-Week Low | — | Lowest price in the last 52 weeks |
-| 10 | Drawdown % | — | Drop from 52-week high (negative = below high) |
-| 11 | P/E Ratio | TTM | `price / EPS TTM` ² |
-| 12 | Dividend Yield % | — | Annual dividend yield in % |
-| 13 | Market Cap | — | Market capitalisation in local currency |
-| 14 | **Last Earnings** | — | Date of the most recent earnings announcement (blank if in the future) |
-| 15 | **Next Earnings** | — | Date of the next expected earnings announcement (blank if already past) |
-| 16 | **Est.** | — | `True` if the next earnings date is an estimate, `False` if confirmed |
-| 17 | FCF (TTM) | TTM | Free Cash Flow — operating CF − CapEx |
-| 18 | LFCF (TTM) | TTM | Levered FCF — FCF after debt payments |
-| 19 | P/FCF | TTM | `market_cap / FCF` (blank if FCF ≤ 0) |
-| 20 | P/LFCF | TTM | `market_cap / LFCF` (blank if LFCF ≤ 0) |
-| 21 | **FCF CAGR %** | Multi-yr | Annualised FCF growth rate ³ |
-| 22 | FCF CV % | Multi-yr | FCF Coefficient of Variation — `(std / mean) × 100` |
-| 23 | FCF Decline Streak | Multi-yr | Consecutive annual FCF declines (0 = growing) |
-| 24 | **Rev CAGR %** | Multi-yr | Total Revenue CAGR — annualised top-line growth ⁵ |
-| 25 | Rev CV % | Multi-yr | Revenue Coefficient of Variation — revenue stability |
-| 26 | Rev Decline Streak | Multi-yr | Consecutive annual Revenue declines |
-| 27 | Total Debt (MRQ) | MRQ | Total interest-bearing debt |
-| 28 | Net Debt (MRQ) | MRQ | `totalDebt − totalCash` |
-| 29 | Debt/Equity (MRQ) | MRQ | Total debt / equity (ratio, e.g. 1.47) |
-| 30 | Net Debt/EBITDA (MRQ/TTM) | Mixed ⁴ | `Net Debt MRQ / EBITDA TTM` |
-| 31 | Avg Vol (3M) | 3M avg | Average daily share volume |
-| 32 | Avg Vol (10D) | 10D avg | Average daily share volume |
-| 33 | Bid | — | Best bid price |
-| 34 | Ask | — | Best ask price |
-| 35 | Bid-Ask Spread | — | `ask − bid` (absolute) |
-| 36 | Spread % | — | `(ask − bid) / mid × 100` |
-| 37 | Avg Daily Value (3M) | 3M | ≈ ADTV: `50-day avg price × 3M avg volume` |
-| 38 | Today's Value | Today | `current price × today's volume` |
+The LLM receives the stock's metrics and recent search results in its prompt,
+then produces a structured analysis with primary causes, contributing factors,
+and market context.
 
-¹ `GBp` = British pence (UK stocks). Price in pence, not pounds.
+## Configuration
 
-² For UK stocks (GBp vs GBP): the server-side P/E filter uses Yahoo's adjusted
-value; the output column divides the pence price by 100 before computing.
-
-⁵ **Revenue CAGR:** same formula as FCF CAGR but applied to Total Revenue from
-the annual income statement.  Revenue is always positive so CAGR is almost
-always computable.  Unlike FCF, Revenue CAGR does not go blank due to negative
-values — only if fewer than 2 years of data are available.
-
-³ **FCF CAGR:** `(FCF_last / FCF_first)^(1/n_years) − 1`.  Computed from the
-oldest to most recent fiscal year in the annual cash flow statement (up to 5
-years).  If either endpoint is negative or zero, CAGR is left blank (the stock
-is still included).
-
-⁴ **Net Debt/EBITDA period mismatch:** the output column uses MRQ net debt
-divided by TTM EBITDA.  The server-side filter uses Yahoo's fully TTM figure.
-Values may differ — the server-side filter is authoritative.
-
-The workbook is formatted with bold headers, frozen panes, alternating row
-fills, number formats per column type, and a green→yellow→red colour scale on
-the Drawdown % column.
-
-## Configuration — `scan_config.yaml`
-
-**This is the only file you need to edit.**  No code changes, no CLI flags.
+### `scan_config.yaml` — scanner settings
 
 ```yaml
 regions:
-  - eu      # expands to all 24 European country codes
+  - eu
   - gb
 
-max_results: 2500          # max tickers to fetch from screener
+max_results: 250
+min_drawdown_pct: 20
 
-min_drawdown_pct: 20       # stocks at least this % below 52-week high
-
-filters:                   # server-side Yahoo Finance filters
+filters:
   min_avg_daily_volume: 1000
-  max_price: 100           # note: UK stocks in GBp (pence)
+  max_price: 100
   max_pe_ratio: 20
-  min_fcf: 0               # FCF (unlevered, TTM) > 0
+  min_fcf: 0
   max_net_debt_to_ebitda: 2
 
-local_filters:             # applied after Ticker.info enrichment
-  min_fcf_cagr: 0          # FCF CAGR ≥ 0% (non-declining); null = disable
+local_filters:
+  min_fcf_cagr: 0
 
 sort:
-  field: avgdailyvol3m    # most liquid stocks fetched first
+  field: avgdailyvol3m
   ascending: false
 
 output_dir: output
 ```
 
-### Server-side filter keys
+### `analysis_config.yaml` — LLM analysis settings
 
-| Key | Period | Description | Direction |
-|---|---|---|---|
-| `min_avg_daily_volume` | 3M | 3-month average daily volume | min |
-| `min_price` | — | Stock price | min |
-| `max_price` | — | Stock price | max |
-| `max_pe_ratio` | TTM | P/E ratio | max |
-| `min_fcf` | TTM | Free Cash Flow (unlevered) | min |
-| `min_levered_fcf` | TTM | Levered Free Cash Flow | min |
-| `max_net_debt_to_ebitda` | TTM | Net Debt / EBITDA | max |
-| `max_price_to_book` | Quarterly | Price-to-book ratio | max |
-| `max_debt_to_equity` | TTM | Total debt / equity | max |
-| `min_return_on_equity` | TTM | Return on equity | min |
-| `min_market_cap` | — | Market capitalisation | min |
-| `max_market_cap` | — | Market capitalisation | max |
+```yaml
+llm:
+  provider: ollama
+  model: qwen3:8b          # change model here
+  host: http://localhost:11434
+  temperature: 0.3
+  num_predict: 2048
+  num_ctx: 32768
 
-### Local post-filter keys
+search:
+  provider: duckduckgo
+  max_results: 8
+  region: wt-wt
 
-| Key | Description |
-|---|---|
-| `min_fcf_cagr` | FCF CAGR ≥ N%.  Stocks with undefined CAGR (negative endpoint) are **kept**.  Set to `null` to disable. |
+analysis:
+  max_records: null         # null = process all; set a number to limit
+  input_dir: output
+  output_dir: reports
+```
 
-> **UK price caveat:** UK stocks (`.L` tickers) are priced in **GBp (pence)**.
-> `max_price: 100` = 100 pence = £1.  To include UK stocks up to £100, use
-> `max_price: 10000`.
+#### Recommended models (RTX 3080 Laptop, 16 GB VRAM)
 
-### Sort field options
+| Model | VRAM | Notes |
+|---|---|---|
+| `qwen3:8b` | ~5 GB | Default. Good reasoning, fast |
+| `qwen3:14b` | ~9 GB | Stronger reasoning, still fits |
+| `mistral-nemo` | ~8 GB | Good alternative |
+| `llama3.1:8b` | ~5 GB | Maximum VRAM headroom |
 
-| `sort.field` | Effect |
-|---|---|
-| `avgdailyvol3m` | Most liquid stocks first (default) |
-| `intradaymarketcap` | Largest companies first |
-| `intradayprice` | Highest-priced stocks first |
-| `percentchange` | Biggest daily movers first |
+#### Custom system prompt
 
-### Understanding `max_results`
+Override the built-in prompt in `analysis_config.yaml`:
 
-The drawdown filter is applied **locally**, so the scanner pages through the
-screener catalogue.  `max_results` caps how many tickers are fetched.
+```yaml
+prompts:
+  price_decline_analyst:
+    system: |
+      You are a financial analyst.  …your instructions here…
+```
 
-With all default filters active, the screener returns a reduced universe.
-At 20% drawdown, roughly 1 in 5 qualifying stocks make the cut, so:
+### CLI overrides
 
-| `max_results` | Approx. candidates |
-|---|---|
-| 500 | ~50–100 |
-| 2500 | ~250–500 |
-| 7000 | all available |
+```bash
+# Scanner
+python3 __main__.py scan --min-drawdown 30
+python3 __main__.py scan --regions de,fr,nl
+python3 __main__.py scan --max-results 1000
+
+# Analyser
+python3 __main__.py analyze --max-records 10
+python3 __main__.py analyze --model qwen3:14b
+python3 __main__.py analyze --output-dir /tmp/reports
+```
 
 ## Project structure
 
 ```
 stock-bot/
-├── scan_config.yaml         ← edit this to change scan parameters
-├── __main__.py              Entry point (python -m stock_bot)
-├── cli.py                   CLI argument parsing and component wiring
-├── scanner.py               Deprecated shim (backward compat only)
+├── __main__.py                  Entry point
+├── cli.py                       CLI: scan + analyze subcommands
+├── scan_config.yaml             Scanner configuration
+├── analysis_config.yaml         LLM analysis configuration
 ├── requirements.txt
-├── README.md
-└── scanning/                Core scanning package
-    ├── __init__.py          Public API
-    ├── config.py            ScanConfig dataclass
-    ├── filters.py           Filter registry (YAML keys → yfinance fields)
-    ├── models.py            StockResult, ScanFailure dataclasses
-    ├── scanner.py           Scanner orchestrator
-    ├── providers/
-    │   ├── base.py          UniverseProvider + PriceProvider ABCs
-    │   └── yahoo.py         Yahoo Finance implementation
-    └── exporters/
-        ├── base.py          BaseExporter ABC
-        └── excel.py         Formatted Excel exporter
+├── .ollama_api_key              Ollama API key (gitignored)
+│
+├── scanning/                    Stock screening package
+│   ├── config.py                ScanConfig dataclass
+│   ├── models.py                StockResult, ScanFailure
+│   ├── scanner.py               Scanner orchestrator
+│   ├── filters.py               Screener filter registry
+│   ├── providers/
+│   │   ├── base.py              UniverseProvider, PriceProvider ABCs
+│   │   └── yahoo.py             Yahoo Finance implementation
+│   └── exporters/
+│       ├── base.py              BaseExporter ABC
+│       └── excel.py             Formatted Excel exporter
+│
+├── analysis/                    LLM analysis package
+│   ├── config.py                AnalysisConfig, LLMConfig, SearchConfig
+│   ├── analyzer.py              Analysis orchestrator
+│   ├── reader.py                Reads latest scan .xlsx
+│   ├── prompts.py               System/user prompt templates
+│   ├── reporter.py              Markdown report writer
+│   ├── llm/
+│   │   ├── base.py              BaseLLM ABC
+│   │   └── ollama.py            Ollama backend
+│   └── search/
+│       ├── base.py              BaseSearchProvider ABC
+│       └── duckduckgo.py        DuckDuckGo search
+│
+├── docker/
+│   ├── Dockerfile
+│   ├── build.sh
+│   ├── run.sh
+│   └── entrypoint.sh
+│
+├── output/                      Scan results (.xlsx)
+└── reports/                     Analysis reports (.md)
 ```
+
+## Output columns (Excel)
+
+| Column | Description |
+|---|---|
+| Company Name | Full company name |
+| Symbol | Ticker (e.g. `VOD.L`, `ENEL.MI`) |
+| Currency | Trading currency (`EUR`, `GBp`, `NOK`) |
+| Sector / Industry | Classification |
+| Current Close | Last closing price |
+| 52-Week High / Low | Price range |
+| Drawdown % | Drop from 52-week high (negative) |
+| P/E Ratio | Trailing P/E (TTM) |
+| Dividend Yield % | Annual yield |
+| Market Cap | In local currency |
+| Last / Next Earnings | Earnings dates |
+| FCF / LFCF (TTM) | Free cash flow metrics |
+| P/FCF, P/LFCF | Valuation ratios |
+| FCF CAGR %, FCF CV % | Cash flow growth and stability |
+| Rev CAGR %, Rev CV % | Revenue growth and stability |
+| Total Debt, Net Debt | Balance sheet (MRQ) |
+| Debt/Equity, Net Debt/EBITDA | Leverage ratios |
+| Avg Vol, Bid/Ask, Spread | Liquidity metrics |
+
+## Server-side filter keys
+
+| Key | Description | Direction |
+|---|---|---|
+| `min_avg_daily_volume` | 3-month avg daily volume | min |
+| `min_price` / `max_price` | Stock price | min / max |
+| `max_pe_ratio` | P/E ratio (TTM) | max |
+| `min_fcf` | Free Cash Flow (TTM) | min |
+| `min_levered_fcf` | Levered FCF (TTM) | min |
+| `max_net_debt_to_ebitda` | Net Debt / EBITDA (TTM) | max |
+| `max_price_to_book` | Price-to-book (quarterly) | max |
+| `max_debt_to_equity` | Total debt / equity (TTM) | max |
+| `min_return_on_equity` | Return on equity (TTM) | min |
+| `min_market_cap` / `max_market_cap` | Market cap | min / max |
+
+## Extending
+
+### New search provider
+
+1. Subclass `BaseSearchProvider` in `analysis/search/`.
+2. Implement `search()` returning `list[SearchResult]`.
+3. Wire it up in `cli.py`.
+
+### New LLM backend
+
+1. Subclass `BaseLLM` in `analysis/llm/`.
+2. Implement `generate()` and `is_available()`.
+3. Wire it up in `cli.py`.
+
+### New analyst role
+
+1. Add a system prompt constant and user prompt builder in `analysis/prompts.py`.
+2. Reference it in the Analyzer or a future role registry.
+
+### New screener filter
+
+1. Add an entry to `FILTER_REGISTRY` in `scanning/filters.py`.
+2. Add the key to `filters:` in `scan_config.yaml`.
 
 ## Important limitations
 
-- Yahoo Finance's screener endpoint is **unofficial**.
-  The API can change, rate-limit, or block automated requests at any time.
-- The drawdown filter is applied **locally**.  Increase `max_results` to scan
+- Yahoo Finance's screener API is **unofficial** and can change or rate-limit.
+- The drawdown filter is applied **locally** — increase `max_results` to scan
   more of the catalogue.
-- **P/E Ratio** in the output is computed as `price / EPS TTM` and may be
-  inaccurate for UK stocks (GBp vs GBP).  The server-side filter is accurate.
-- **UK price filter:** `max_price: 100` = 100 pence, not £100.
-- **Net Debt/EBITDA column** uses MRQ net debt; the filter uses TTM net debt.
-- **FCF CAGR:** blank when either the first or last fiscal-year FCF is negative.
-  The stock is still included — only the column is blank.
-- **Avg Daily Value** is an approximation: `50-day avg price × 3M avg volume`.
-- **Bid/Ask/Spread** are delayed (15 min) and may not be available after close.
-- Intended for personal research.  Verify candidates with your broker.
+- **UK prices** are in GBp (pence). `max_price: 100` = 100p = £1.
+- **DuckDuckGo search** may return no results for very obscure companies.
+  The LLM will still produce an analysis from the stock data alone.
+- **LLM analysis** is only as good as the model and the search results.
+  Always verify with primary sources.
+- Intended for personal research. Not financial advice.
 
-## Setup
-
-**Linux / macOS**
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-**Windows (PowerShell)**
-
-```powershell
-py -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-```
-
-## Run
-
-```bash
-cd stock-bot
-source .venv/bin/activate   # Windows: .venv\Scripts\Activate.ps1
-python cli.py
-```
-
-The scanner reads all parameters from `scan_config.yaml`.
-
-### Optional CLI overrides
-
-```bash
-python cli.py --min-drawdown 30
-python cli.py --regions de,fr,nl
-python cli.py --max-results 1000
-python cli.py --output-dir /data/scans
-python cli.py --symbols-file my_symbols.csv   # bypasses screener
-```
-
-## Run daily
-
-### Linux / macOS cron
+## Run daily (cron)
 
 ```cron
-30 20 * * 1-5 cd /path/to/stock-bot && .venv/bin/python cli.py >> scanner.log 2>&1
+# Scan after European market close, then analyse
+30 20 * * 1-5 cd /path/to/stock-bot && ./docker/run.sh -c 'python3 __main__.py scan && python3 __main__.py analyze' >> bot.log 2>&1
 ```
-
-### Windows Task Scheduler
-
-1. **Trigger:** Daily at 20:30 (after European market close).
-2. **Program:** full path to `.venv\Scripts\python.exe`.
-3. **Arguments:** `cli.py`.
-4. **Start in:** `stock-bot/` folder.
-
-## Extending the scanner
-
-### Adding a new server-side screener filter
-
-1. Add an entry to `FILTER_REGISTRY` in `scanning/filters.py`.
-2. Add the key with a value (or `null`) to the `filters:` section of `scan_config.yaml`.
-
-### Adding a new local post-filter
-
-1. Add a field to `ScanConfig` in `scanning/config.py`.
-2. Apply the filter in `_enrich_with_fcf()` in `scanning/providers/yahoo.py`.
-3. Read the value from `local_filters:` in `scan_config.yaml` via `cli.py`.
-
-### Adding a new data provider
-
-1. Subclass `UniverseProvider` / `PriceProvider` in `scanning/providers/`.
-2. Override `get_precomputed_results()` to return `StockResult` objects.
-3. Replace `YahooProvider()` in `cli.py`.
-
-## Calculation notes
-
-| Column | Formula / Source |
-|---|---|
-| Drawdown % | `fiftyTwoWeekHighChangePercent × 100` |
-| P/E Ratio | `price_in_reporting_currency / epsTrailingTwelveMonths` |
-| Dividend Yield % | `dividendYield` (already in %, e.g. `7.60` = 7.60%) |
-| Market Cap | `marketCap` in local currency units |
-| FCF (TTM) | `freeCashflow` from `Ticker.info` (unlevered, TTM) |
-| LFCF (TTM) | `leveredFreeCashFlow` from `Ticker.info` (TTM) |
-| P/FCF | `marketCap / FCF` |
-| P/LFCF | `marketCap / LFCF` |
-| FCF CAGR % | `(FCF_last / FCF_first)^(1/n_years) − 1` × 100; blank if either endpoint ≤ 0 |
-| FCF CV % | `(sample std dev / mean) × 100` over available FCF history |
-| FCF Decline Streak | Count of consecutive year-over-year FCF declines ending at most recent year |
-| Rev CAGR % | `(Rev_last / Rev_first)^(1/n_years) − 1` × 100 (Total Revenue, annual) |
-| Rev CV % | `(sample std dev / mean) × 100` over available Revenue history |
-| Rev Decline Streak | Count of consecutive year-over-year Revenue declines |
-| Total Debt (MRQ) | `totalDebt` from `Ticker.info` (MRQ) |
-| Net Debt (MRQ) | `totalDebt − totalCash` (both MRQ) |
-| Debt/Equity (MRQ) | `debtToEquity / 100` (MRQ, converted from %) |
-| Net Debt/EBITDA (MRQ/TTM) | `(totalDebt − totalCash) / ebitda` |
-| Avg Daily Value (3M) | `fiftyDayAverage × averageDailyVolume3Month` |
-| Today's Value | `regularMarketPrice × regularMarketVolume` |
-| Bid-Ask Spread | `ask − bid` |
-| Spread % | `(ask − bid) / ((ask + bid) / 2) × 100` |
-
-## Suggested next versions
-
-- Persistent cache to avoid re-querying unchanged data daily.
-- Second independent data source for cross-verification.
-- Alert only when a symbol **newly** crosses the threshold.
-- AI-powered analysis layer for candidate ranking and commentary.
